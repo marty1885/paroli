@@ -84,6 +84,32 @@ struct ModelSession {
   ModelSession() : onnx(nullptr){};
 };
 
+struct EncoderInferer {
+  Ort::Session onnx;
+  Ort::AllocatorWithDefaultOptions allocator;
+  Ort::SessionOptions options;
+  Ort::Env env;
+
+  void infer(const std::vector<int64_t> &inputIds,
+             int64_t inputLength,
+             std::optional<int64_t> sid,
+             float noiseScale,
+             float lengthScale,
+             float noiseW);
+  void load(std::string modelPath);
+
+  EncoderInferer() : onnx(nullptr){};
+};
+
+struct DecoderInferer {
+  Ort::Session onnx;
+  Ort::AllocatorWithDefaultOptions allocator;
+  Ort::SessionOptions options;
+  Ort::Env env;
+
+  DecoderInferer() : onnx(nullptr){};
+};
+
 struct SynthesisResult {
   double inferSeconds;
   double audioSeconds;
@@ -96,6 +122,9 @@ struct Voice {
   SynthesisConfig synthesisConfig;
   ModelConfig modelConfig;
   ModelSession session;
+
+  EncoderInferer encoder;
+  DecoderInferer decoder;
 };
 
 // True if the string is a single UTF-8 codepoint
@@ -115,6 +144,7 @@ void terminate(PiperConfig &config);
 
 // Load Onnx model and JSON config file
 void loadVoice(PiperConfig &config, std::string modelPath,
+               std::string encoderPath, std::string decoderPath,
                std::string modelConfigPath, Voice &voice,
                std::optional<SpeakerId> &speakerId, bool useCuda);
 

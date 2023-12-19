@@ -42,6 +42,12 @@ struct RunConfig {
   // Path to .onnx voice file
   filesystem::path modelPath;
 
+  // Path to .onnx encoder model
+  filesystem::path encoderPath;
+
+  // Path to .onnx decoder model
+  filesystem::path decoderPath;
+
   // Path to JSON voice config file
   filesystem::path modelConfigPath;
 
@@ -99,6 +105,7 @@ void rawOutputProc(vector<int16_t> &sharedAudioBuffer, mutex &mutAudio,
 
 int main(int argc, char *argv[]) {
   spdlog::set_default_logger(spdlog::stderr_color_st("piper"));
+  spdlog::set_level(spdlog::level::debug);
 
   RunConfig runConfig;
   parseArgs(argc, argv, runConfig);
@@ -463,6 +470,12 @@ void parseArgs(int argc, char *argv[], RunConfig &runConfig) {
     if (arg == "-m" || arg == "--model") {
       ensureArg(argc, argv, i);
       runConfig.modelPath = filesystem::path(argv[++i]);
+    if (arg == "--encoder") {
+      ensureArg(argc, argv, i);
+      runConfig.encoderPath = filesystem::path(argv[++i]);
+    } else if (arg == "--decoder") {
+      ensureArg(argc, argv, i);
+      runConfig.decoderPath = filesystem::path(argv[++i]);
     } else if (arg == "-c" || arg == "--config") {
       ensureArg(argc, argv, i);
       modelConfigPath = filesystem::path(argv[++i]);

@@ -307,6 +307,7 @@ void loadModel(std::string modelPath, ModelSession &session, bool useCuda) {
 
 // Load Onnx model and JSON config file
 void loadVoice(PiperConfig &config, std::string modelPath,
+               std::string encoderPath, std::string decoderPath,
                std::string modelConfigPath, Voice &voice,
                std::optional<SpeakerId> &speakerId, bool useCuda) {
   spdlog::debug("Parsing voice config at {}", modelConfigPath);
@@ -332,6 +333,85 @@ void loadVoice(PiperConfig &config, std::string modelPath,
   loadModel(modelPath, voice.session, useCuda);
 
 } /* loadVoice */
+
+void EncoderInferer::load(std::string path)
+{
+    spdlog::debug("Loading encoder onnx model from {}", path);
+    env = Ort::Env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING,
+                             instanceName.c_str());
+    env.DisableTelemetryEvents();
+    
+    options.SetGraphOptimizationLevel(
+        GraphOptimizationLevel::ORT_DISABLE_ALL);
+    
+    //options.DisableCpuMemArena();
+    //options.DisableMemPattern();
+    onnx = Ort::Session(env, path.c_str(), options);
+}
+
+void EncoderInferer::infer(const std::vector<int64_t> &phonemeIds,
+             int64_t inputLength,
+             std::optional<int64_t> sid,
+             float noiseScale,
+             float lengthScale,
+             float noiseW)
+{
+  auto memoryInfo = Ort::MemoryInfo::CreateCpu(
+      OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+
+  // Allocate
+  std::vector<int64_t> phonemeIdLengths{(int64_t)phonemeIds.size()};
+  std::vector<float> scales{noiseScale,
+                            lengthScale,
+                            noiseW};
+
+  std::vector<Ort::Value> inputTensors;
+  std::vector<int64_t> phonemeIdsShape{1, (int64_t)phonemeIds.size()};
+  inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(
+      memoryInfo, (int64_t*)phonemeIds.data(), phonemeIds.size(), phonemeIdsShape.data(),
+      phonemeIdsShape.size()));
+
+  std::vector<int64_t> phomemeIdLengthsShape{(int64_t)phonemeIdLengths.size()};
+  inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(
+      memoryInfo, phonemeIdLengths.data(), phonemeIdLengths.size(),
+      phomemeIdLengthsShape.data(), phomemeIdLengthsShape.size()));
+
+  std::vector<int64_t> scalesShape{(int64_t)scales.size()};
+  inputTensors.push_back(
+      Ort::Value::CreateTensor<float>(memoryInfo, scales.data(), scales.size(),
+                                      scalesShape.data(), scalesShape.size()));
+
+  // Add speaker id.
+  // NOTE: These must be kept outside the "if" below to avoid being deallocated.
+  std::vector<int64_t> speakerId{sid.value_or(0)};
+  std::vector<int64_t> speakerIdShape{(int64_t)speakerId.size()};
+
+  if (sid.has_value()) {
+    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(
+        memoryInfo, speakerId.data(), speakerId.size(), speakerIdShape.data(),
+        speakerIdShape.size()));
+  }
+
+  // From export_onnx.py
+  std::array<const char *, 4> inputNames = {"input", "input_lengths", "scales",
+                                            "sid"};
+  std::array<const char *, 1> outputNames = {"output"};
+
+  // Infer
+  auto startTime = std::chrono::steady_clock::now();
+  auto outputTensors = onnx.Run(
+      Ort::RunOptions{nullptr}, inputNames.data(), inputTensors.data(),
+      inputTensors.size(), outputNames.data(), outputNames.size());
+  auto endTime = std::chrono::steady_clock::now();
+
+  if ((outputTensors.size() != 1) || (!outputTensors.front().IsTensor())) {
+    throw std::runtime_error("Invalid output tensors");
+  }
+  auto inferDuration = std::chrono::duration<double>(endTime - startTime);
+  auto inferSeconds = inferDuration.count();
+
+  spdlog::debug("Encoder inference took {} seconds", inferSeconds);
+}
 
 // Phoneme ids to WAV audio
 void synthesize(std::vector<PhonemeId> &phonemeIds,
@@ -469,6 +549,8 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
 
   if (voice.phonemizeConfig.phonemeType == eSpeakPhonemes) {
     // Use espeak-ng for phonemization
+    static std::mutex espeakMutex; // espak-ng is not thread-safe
+    std::lock_guard<std::mutex> lock(espeakMutex);
     eSpeakPhonemeConfig eSpeakConfig;
     eSpeakConfig.voice = voice.phonemizeConfig.eSpeak.voice;
     phonemize_eSpeak(text, eSpeakConfig, phonemes);
