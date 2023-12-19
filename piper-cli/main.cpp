@@ -39,9 +39,6 @@ using json = nlohmann::json;
 enum OutputType { OUTPUT_FILE, OUTPUT_DIRECTORY, OUTPUT_STDOUT, OUTPUT_RAW };
 
 struct RunConfig {
-  // Path to .onnx voice file
-  filesystem::path modelPath;
-
   // Path to .onnx encoder model
   filesystem::path encoderPath;
 
@@ -118,12 +115,12 @@ int main(int argc, char *argv[]) {
   piper::PiperConfig piperConfig;
   piper::Voice voice;
 
-  spdlog::debug("Loading voice from {} (config={})",
-                runConfig.modelPath.string(),
-                runConfig.modelConfigPath.string());
+  spdlog::debug("Voice config: {}", runConfig.modelConfigPath.string());
+  spdlog::debug("Encoder model: {}", runConfig.encoderPath.string());
+  spdlog::debug("Decoder model: {}", runConfig.decoderPath.string());
 
   auto startTime = chrono::steady_clock::now();
-  loadVoice(piperConfig, runConfig.modelPath.string(),
+  loadVoice(piperConfig, "", runConfig.encoderPath.string(), runConfig.decoderPath.string(),
             runConfig.modelConfigPath.string(), voice, runConfig.speakerId,
             runConfig.useCuda);
   auto endTime = chrono::steady_clock::now();
@@ -414,7 +411,8 @@ void printUsage(char *argv[]) {
   cerr << endl;
   cerr << "options:" << endl;
   cerr << "   -h        --help              show this message and exit" << endl;
-  cerr << "   -m  FILE  --model       FILE  path to onnx model file" << endl;
+  cerr << "   --encoder FILE  path to encoder model file" << endl;
+  cerr << "   --decoder FILE  path to decoder model file" << endl;
   cerr << "   -c  FILE  --config      FILE  path to model config file "
           "(default: model path + .json)"
        << endl;
@@ -464,12 +462,10 @@ void ensureArg(int argc, char *argv[], int argi) {
 void parseArgs(int argc, char *argv[], RunConfig &runConfig) {
   optional<filesystem::path> modelConfigPath;
 
+  // TODO: This CLI parser can heap overflow
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
 
-    if (arg == "-m" || arg == "--model") {
-      ensureArg(argc, argv, i);
-      runConfig.modelPath = filesystem::path(argv[++i]);
     if (arg == "--encoder") {
       ensureArg(argc, argv, i);
       runConfig.encoderPath = filesystem::path(argv[++i]);
@@ -554,17 +550,16 @@ void parseArgs(int argc, char *argv[], RunConfig &runConfig) {
   }
 
   // Verify model file exists
-  ifstream modelFile(runConfig.modelPath.c_str(), ios::binary);
-  if (!modelFile.good()) {
-    throw runtime_error("Model file doesn't exist");
+  if(!filesystem::exists(runConfig.encoderPath)){
+    throw runtime_error("Encoder model file doesn't exist");
   }
-
-  if (!modelConfigPath) {
-    runConfig.modelConfigPath =
-        filesystem::path(runConfig.modelPath.string() + ".json");
-  } else {
-    runConfig.modelConfigPath = modelConfigPath.value();
+  if(!filesystem::exists(runConfig.decoderPath)){
+    throw runtime_error("Decoder model file doesn't exist");
   }
+  if(!modelConfigPath){
+    throw runtime_error("Model config file must be provided");
+  }
+  runConfig.modelConfigPath = modelConfigPath.value();
 
   // Verify model config exists
   ifstream modelConfigFile(runConfig.modelConfigPath.c_str());

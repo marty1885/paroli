@@ -14,6 +14,11 @@
 #include "utf8.h"
 #include "wavfile.hpp"
 
+#include <xtensor/xarray.hpp>
+#include <xtensor/xadapt.hpp>
+#include <xtensor/xio.hpp>
+#include <xtensor/xview.hpp>
+
 namespace piper {
 
 #ifdef _PIPER_VERSION
@@ -330,9 +335,76 @@ void loadVoice(PiperConfig &config, std::string modelPath,
 
   spdlog::debug("Voice contains {} speaker(s)", voice.modelConfig.numSpeakers);
 
-  loadModel(modelPath, voice.session, useCuda);
+  //loadModel(modelPath, voice.session, useCuda);
+  voice.encoder.load(encoderPath);
+  voice.decoder.load(decoderPath);
 
 } /* loadVoice */
+
+void DecoderInferer::load(std::string path)
+{
+    spdlog::debug("Loading decoder onnx model from {}", path);
+    env = Ort::Env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING,
+                             instanceName.c_str());
+    env.DisableTelemetryEvents();
+    
+    options.SetGraphOptimizationLevel(
+        GraphOptimizationLevel::ORT_DISABLE_ALL);
+    
+    //options.DisableCpuMemArena();
+    //options.DisableMemPattern();
+    onnx = Ort::Session(env, path.c_str(), options);
+}
+
+std::vector<int16_t> DecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g)
+{
+  auto memoryInfo = Ort::MemoryInfo::CreateCpu(
+      OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
+
+  std::vector<Ort::Value> inputTensors;
+  // HACK: Fix this later
+  const std::array<std::string, 3> paramNames = {"z", "y_mask", "g"};
+  for(auto& name : paramNames) {
+    const xt::xarray<float>* ptr = nullptr;
+    if(name == "z")
+      ptr = &z;
+    else if(name == "y_mask")
+      ptr = &y_mask;
+    else if(name == "g")
+      ptr = &g;
+    else
+      throw std::runtime_error("Invalid parameter name");
+    auto& arr = *ptr;
+    std::vector<int64_t> shape(arr.shape().begin(), arr.shape().end());
+    inputTensors.push_back(Ort::Value::CreateTensor<float>(
+        memoryInfo, (float*)arr.data(), arr.size(), shape.data(),
+        shape.size()));
+  }
+
+  std::array<const char *, 3> inputNames = {"z", "y_mask", "g"};
+  std::array<const char *, 1> outputNames = {"output"};
+
+  auto startTime = std::chrono::steady_clock::now();
+  auto outputTensors = onnx.Run(
+      Ort::RunOptions{nullptr}, inputNames.data(), inputTensors.data(),
+      inputTensors.size(), outputNames.data(), outputNames.size());
+  auto endTime = std::chrono::steady_clock::now();
+
+  if ((outputTensors.size() != 1) || (!outputTensors.front().IsTensor())) {
+    throw std::runtime_error("Invalid output tensors");
+  }
+  std::vector<int16_t> output;
+  output.resize(outputTensors.front().GetTensorTypeAndShapeInfo().GetElementCount());
+  auto ortOutPtr = outputTensors.front().GetTensorData<float>();
+  for(size_t i = 0; i < output.size(); i++) {
+      float val = ortOutPtr[i] * std::numeric_limits<int16_t>::max();
+      val = std::min(std::max(val, (float)std::numeric_limits<int16_t>::min()), (float)std::numeric_limits<int16_t>::max());
+      output[i] = (int16_t)val;
+  }
+  spdlog::debug("Decoder inference took {} seconds", std::chrono::duration<double>(endTime - startTime).count());
+  return output;
+}
+
 
 void EncoderInferer::load(std::string path)
 {
@@ -349,7 +421,7 @@ void EncoderInferer::load(std::string path)
     onnx = Ort::Session(env, path.c_str(), options);
 }
 
-void EncoderInferer::infer(const std::vector<int64_t> &phonemeIds,
+std::map<std::string, xt::xarray<float>> EncoderInferer::infer(const std::vector<int64_t> &phonemeIds,
              int64_t inputLength,
              std::optional<int64_t> sid,
              float noiseScale,
@@ -395,7 +467,8 @@ void EncoderInferer::infer(const std::vector<int64_t> &phonemeIds,
   // From export_onnx.py
   std::array<const char *, 4> inputNames = {"input", "input_lengths", "scales",
                                             "sid"};
-  std::array<const char *, 1> outputNames = {"output"};
+  // TODO: Just use all outputs
+  std::array<const char *, 3> outputNames = {"z", "y_mask", "g"};
 
   // Infer
   auto startTime = std::chrono::steady_clock::now();
@@ -404,13 +477,31 @@ void EncoderInferer::infer(const std::vector<int64_t> &phonemeIds,
       inputTensors.size(), outputNames.data(), outputNames.size());
   auto endTime = std::chrono::steady_clock::now();
 
-  if ((outputTensors.size() != 1) || (!outputTensors.front().IsTensor())) {
-    throw std::runtime_error("Invalid output tensors");
+  if(outputTensors.size() != outputNames.size())
+    throw std::runtime_error("Number of output tensors does not match number of output names");
+
+  std::map<std::string, xt::xarray<float>> output;
+  for(int i = 0; i < outputTensors.size(); i++) {
+      if(!outputTensors[i].IsTensor())
+        throw std::runtime_error("Output tensor is not a tensor");
+
+      xt::xarray<float> arr = xt::adapt(outputTensors[i].GetTensorMutableData<float>(),
+                                        outputTensors[i].GetTensorTypeAndShapeInfo().GetShape());
+      output[outputNames[i]] = std::move(arr);
   }
+
   auto inferDuration = std::chrono::duration<double>(endTime - startTime);
   auto inferSeconds = inferDuration.count();
+  // clean up
+  for (std::size_t i = 0; i < outputTensors.size(); i++) {
+    Ort::detail::OrtRelease(outputTensors[i].release());
+  }
+  for (std::size_t i = 0; i < inputTensors.size(); i++) {
+    Ort::detail::OrtRelease(inputTensors[i].release());
+  }
 
   spdlog::debug("Encoder inference took {} seconds", inferSeconds);
+  return output;
 }
 
 // Phoneme ids to WAV audio
@@ -649,8 +740,65 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
       }
 
       // ids -> audio
-      synthesize(phonemeIds, voice.synthesisConfig, voice.session, audioBuffer,
-                 phraseResults[phraseIdx]);
+      //synthesize(phonemeIds, voice.synthesisConfig, voice.session, audioBuffer,
+      //           phraseResults[phraseIdx]);
+      auto encode_start = std::chrono::steady_clock::now();
+      auto params = voice.encoder.infer(phonemeIds, phrasePhonemes[phraseIdx]->size(),
+                          voice.synthesisConfig.speakerId,
+                          voice.synthesisConfig.noiseScale,
+                          voice.synthesisConfig.lengthScale,
+                          voice.synthesisConfig.noiseW);
+      auto encode_end = std::chrono::steady_clock::now();
+      float encode_seconds = std::chrono::duration<double>(encode_end - encode_start).count();
+      auto& g = params["g"]; // g could be missing. TODO: Fix this
+      auto& y_mask = params["y_mask"];
+      auto& z = params["z"];
+
+      size_t nslices = z.shape()[2];
+      if(nslices != y_mask.shape()[2])
+        throw std::runtime_error("z and y_mask must have the same number of slices");
+
+      const size_t chunkSize = 45;
+      const size_t padding = 10;
+
+
+      float audioSeconds = 0;
+      float inferSeconds = encode_seconds;
+
+      // Too small to chunk, just pass it through
+      if(nslices < chunkSize + padding * 2) {
+          auto t0 = std::chrono::steady_clock::now();
+          audioBuffer = voice.decoder.infer(z, y_mask, g);
+          auto t1 = std::chrono::steady_clock::now();
+          inferSeconds += std::chrono::duration<double>(t1 - t0).count();
+          audioSeconds = (double)audioBuffer.size() / (double)voice.synthesisConfig.sampleRate;
+      }
+      else {
+        for(size_t i=0,idx=0;i<nslices;i+=chunkSize,idx++) {
+          size_t start = i > padding ? i - padding : 0;
+          size_t end = std::min(nslices, i + chunkSize + padding);
+          auto z_chunk = xt::view(z, xt::all(), xt::all(), xt::range(start, end));
+          auto y_mask_chunk = xt::view(y_mask, xt::all(), xt::all(), xt::range(start, end));
+
+          auto t0 = std::chrono::steady_clock::now();
+          auto chunk_audio = voice.decoder.infer(z_chunk, y_mask_chunk, g);
+          auto t1 = std::chrono::steady_clock::now();
+
+          auto real_start = chunk_audio.begin() + (i - start) * 256;
+          auto end_pad = std::min(end - i - chunkSize, padding);
+          auto real_end = chunk_audio.end() - end_pad * 256;
+          audioBuffer.insert(audioBuffer.end(), real_start, real_end);
+          float chunk_audio_seconds = (double)chunk_audio.size() / (double)voice.synthesisConfig.sampleRate;
+          float chunk_infer_seconds = std::chrono::duration<double>(t1 - t0).count();
+
+          audioSeconds += chunk_audio_seconds;
+          inferSeconds += chunk_infer_seconds;
+          auto rtf = chunk_infer_seconds / chunk_audio_seconds;
+          spdlog::debug("Chunk {} took {} seconds, RTF: {}", idx, std::chrono::duration<double>(t1 - t0).count(), rtf);
+        }
+        phraseResults[phraseIdx].audioSeconds = audioSeconds;
+        phraseResults[phraseIdx].inferSeconds = inferSeconds;
+      }
 
       // Add end of phrase silence
       for (std::size_t i = 0; i < phraseSilenceSamples[phraseIdx]; i++) {

@@ -15,6 +15,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <xtensor/xarray.hpp>
+
 using json = nlohmann::json;
 
 namespace piper {
@@ -90,13 +92,13 @@ struct EncoderInferer {
   Ort::SessionOptions options;
   Ort::Env env;
 
-  void infer(const std::vector<int64_t> &inputIds,
+  virtual std::map<std::string, xt::xarray<float>> infer(const std::vector<int64_t> &inputIds,
              int64_t inputLength,
              std::optional<int64_t> sid,
              float noiseScale,
              float lengthScale,
              float noiseW);
-  void load(std::string modelPath);
+  virtual void load(std::string modelPath);
 
   EncoderInferer() : onnx(nullptr){};
 };
@@ -106,6 +108,9 @@ struct DecoderInferer {
   Ort::AllocatorWithDefaultOptions allocator;
   Ort::SessionOptions options;
   Ort::Env env;
+
+  virtual std::vector<int16_t> infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g);
+  virtual void load(std::string modelPath);
 
   DecoderInferer() : onnx(nullptr){};
 };
