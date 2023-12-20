@@ -397,9 +397,8 @@ std::vector<int16_t> DecoderInferer::infer(const xt::xarray<float>& z, const xt:
   output.resize(outputTensors.front().GetTensorTypeAndShapeInfo().GetElementCount());
   auto ortOutPtr = outputTensors.front().GetTensorData<float>();
   for(size_t i = 0; i < output.size(); i++) {
-      float val = ortOutPtr[i] * std::numeric_limits<int16_t>::max();
-      val = std::min(std::max(val, (float)std::numeric_limits<int16_t>::min()), (float)std::numeric_limits<int16_t>::max());
-      output[i] = (int16_t)val;
+      float val = std::min(std::max(ortOutPtr[i], -1.0f), 1.0f);
+      output[i] = val * MAX_WAV_VALUE;
   }
   spdlog::debug("Decoder inference took {} seconds", std::chrono::duration<double>(endTime - startTime).count());
   return output;
@@ -785,8 +784,14 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
           auto t1 = std::chrono::steady_clock::now();
 
           auto real_start = chunk_audio.begin() + (i - start) * 256;
-          auto end_pad = std::min(end - i - chunkSize, padding);
+          auto end_pad = padding;
+          if(i+chunkSize >= nslices)
+            end_pad = 0;
+          else if(i+chunkSize+padding >= nslices)
+            end_pad = nslices - (i+chunkSize);
+
           auto real_end = chunk_audio.end() - end_pad * 256;
+          spdlog::debug("Chunk {} has {} samples, end_pad: {}", idx, chunk_audio.size(), end_pad);
           audioBuffer.insert(audioBuffer.end(), real_start, real_end);
           float chunk_audio_seconds = (double)chunk_audio.size() / (double)voice.synthesisConfig.sampleRate;
           float chunk_infer_seconds = std::chrono::duration<double>(t1 - t0).count();
