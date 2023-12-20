@@ -825,6 +825,15 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
             for(size_t j=0;j<compare_window;j++) {
                 prev_base_ptr[j] = (prev_base_ptr[j] + next_base_ptr[j]) / 2;
             }
+
+            // Call the callback (if any) before we write the audio
+            // This has to be here because we modify the audio buffer
+            // above.
+            // TODO: This is ugly. Fix it.
+            if(audioCallback) {
+              audioCallback();
+              audioBuffer.clear();
+            }
           }
 
           auto real_end = chunk_audio.end() - end_pad * 256;
@@ -836,6 +845,12 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
           inferSeconds += chunk_infer_seconds;
           auto rtf = chunk_infer_seconds / chunk_audio_seconds;
           spdlog::debug("Chunk {} took {} seconds, RTF: {}", idx, std::chrono::duration<double>(t1 - t0).count(), rtf);
+
+          if(i == 0 && phraseIdx == 0) {
+            auto t = std::chrono::steady_clock::now();
+            auto first_chunk_duration = std::chrono::duration<double>(t - encode_start).count();
+            spdlog::debug("First chunk latency: {} seconds", first_chunk_duration);
+          }
         }
         phraseResults[phraseIdx].audioSeconds = audioSeconds;
         phraseResults[phraseIdx].inferSeconds = inferSeconds;
