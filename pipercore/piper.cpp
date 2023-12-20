@@ -337,11 +337,13 @@ void loadVoice(PiperConfig &config, std::string modelPath,
 
   //loadModel(modelPath, voice.session, useCuda);
   voice.encoder.load(encoderPath);
-  voice.decoder.load(decoderPath);
+
+  voice.decoder = std::make_unique<OnnxDecoderInferer>();
+  voice.decoder->load(decoderPath);
 
 } /* loadVoice */
 
-void DecoderInferer::load(std::string path)
+void OnnxDecoderInferer::load(std::string path)
 {
     spdlog::debug("Loading decoder onnx model from {}", path);
     env = Ort::Env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING,
@@ -356,7 +358,7 @@ void DecoderInferer::load(std::string path)
     onnx = Ort::Session(env, path.c_str(), options);
 }
 
-std::vector<int16_t> DecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g)
+std::vector<int16_t> OnnxDecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g)
 {
   auto memoryInfo = Ort::MemoryInfo::CreateCpu(
       OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
@@ -767,7 +769,7 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
       // Too small to chunk, just pass it through
       if(nslices < chunkSize + padding * 2) {
           auto t0 = std::chrono::steady_clock::now();
-          audioBuffer = voice.decoder.infer(z, y_mask, g);
+          audioBuffer = voice.decoder->infer(z, y_mask, g);
           auto t1 = std::chrono::steady_clock::now();
           inferSeconds += std::chrono::duration<double>(t1 - t0).count();
           audioSeconds = (double)audioBuffer.size() / (double)voice.synthesisConfig.sampleRate;
@@ -780,7 +782,7 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
           auto y_mask_chunk = xt::view(y_mask, xt::all(), xt::all(), xt::range(start, end));
 
           auto t0 = std::chrono::steady_clock::now();
-          auto chunk_audio = voice.decoder.infer(z_chunk, y_mask_chunk, g);
+          auto chunk_audio = voice.decoder->infer(z_chunk, y_mask_chunk, g);
           auto t1 = std::chrono::steady_clock::now();
 
           auto real_start = chunk_audio.begin() + (i - start) * 256;

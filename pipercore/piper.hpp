@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "inferer.hpp"
+
 #include <onnxruntime_cxx_api.h>
 #include <piper-phonemize/phoneme_ids.hpp>
 #include <piper-phonemize/phonemize.hpp>
@@ -103,16 +105,16 @@ struct EncoderInferer {
   EncoderInferer() : onnx(nullptr){};
 };
 
-struct DecoderInferer {
+struct OnnxDecoderInferer : DecoderInferer {
   Ort::Session onnx;
   Ort::AllocatorWithDefaultOptions allocator;
   Ort::SessionOptions options;
   Ort::Env env;
 
-  virtual std::vector<int16_t> infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g);
-  virtual void load(std::string modelPath);
+  std::vector<int16_t> infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g) override;
+  void load(std::string modelPath) override;
 
-  DecoderInferer() : onnx(nullptr){};
+  OnnxDecoderInferer() : onnx(nullptr){};
 };
 
 struct SynthesisResult {
@@ -129,7 +131,7 @@ struct Voice {
   ModelSession session;
 
   EncoderInferer encoder;
-  DecoderInferer decoder;
+  std::unique_ptr<DecoderInferer> decoder;
 };
 
 // True if the string is a single UTF-8 codepoint
