@@ -14,6 +14,8 @@
 #include "utf8.h"
 #include "wavfile.hpp"
 
+#include "rknn-inferer.hpp"
+
 #include <xtensor/xarray.hpp>
 #include <xtensor/xadapt.hpp>
 #include <xtensor/xio.hpp>
@@ -338,7 +340,11 @@ void loadVoice(PiperConfig &config, std::string modelPath,
   //loadModel(modelPath, voice.session, useCuda);
   voice.encoder.load(encoderPath);
 
-  voice.decoder = std::make_unique<OnnxDecoderInferer>();
+  // TODO: Parse wtih std::filesystem
+  if(decoderPath.rfind(".rknn") == decoderPath.size() - 5)
+      voice.decoder = std::make_unique<RknnDecoderInferer>();
+  else
+      voice.decoder = std::make_unique<OnnxDecoderInferer>();
   voice.decoder->load(decoderPath);
 
 } /* loadVoice */
@@ -760,8 +766,7 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
         throw std::runtime_error("z and y_mask must have the same number of slices");
 
       const size_t chunkSize = 45;
-      const size_t padding = 10;
-
+      const size_t padding = 5;
 
       float audioSeconds = 0;
       float inferSeconds = encode_seconds;
@@ -793,7 +798,6 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
             end_pad = nslices - (i+chunkSize);
 
           auto real_end = chunk_audio.end() - end_pad * 256;
-          spdlog::debug("Chunk {} has {} samples, end_pad: {}", idx, chunk_audio.size(), end_pad);
           audioBuffer.insert(audioBuffer.end(), real_start, real_end);
           float chunk_audio_seconds = (double)chunk_audio.size() / (double)voice.synthesisConfig.sampleRate;
           float chunk_infer_seconds = std::chrono::duration<double>(t1 - t0).count();

@@ -24,7 +24,8 @@ link_directories(${PIPER_PHONEMIZE_ROOT}/lib)
 find_package(fmt REQUIRED)
 
 add_library(pipercore
-    pipercore/piper.cpp)
+    pipercore/piper.cpp
+    pipercore/rknn-inferer.cpp) # TODO: Make this optional
 
 target_precompile_headers(pipercore PRIVATE pipercore/pch.hpp)
 
@@ -35,7 +36,8 @@ target_link_libraries(pipercore
     piper_phonemize
     pthread
     fmt::fmt
-    dl)
+    dl
+    rknnrt)
 
 target_include_directories(pipercore
     PUBLIC
