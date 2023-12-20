@@ -797,6 +797,36 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
           else if(i+chunkSize+padding >= nslices)
             end_pad = nslices - (i+chunkSize);
 
+          // HACK: compare the end of the previous chunk and the start of the next chunk to determine the best
+          // place to stitch them together
+          // This is 99% good. Still get pops rarely.
+          constexpr size_t compare_window = 24;
+          constexpr size_t search_window = 44;
+          static_assert(compare_window < search_window, "compare_window must be less than search_window");
+          if(audioBuffer.size() > compare_window && chunk_audio.size() > search_window * 2) {
+            auto prev_chunk_end = audioBuffer.end() - compare_window;
+            auto next_chunk_start = real_start;
+            next_chunk_start -= std::min(std::distance(chunk_audio.begin(), next_chunk_start), (ptrdiff_t)compare_window);
+            size_t min_diff = std::numeric_limits<size_t>::max();
+            // increment by 4 to speed up the search
+            for(size_t j=0;j<search_window*2;j+=4) {
+              size_t diff = 0;
+              for(size_t k=0;k<compare_window;k++) {
+                diff += std::abs(prev_chunk_end[k] - next_chunk_start[j+k]);
+              }
+              if(diff < min_diff) {
+                min_diff = diff;
+                real_start = next_chunk_start + j + compare_window;
+              }
+            }
+            // average the samples in the compare window to smooth out the transition even more
+            auto prev_base_ptr = audioBuffer.end() - compare_window;
+            auto next_base_ptr = real_start - compare_window;
+            for(size_t j=0;j<compare_window;j++) {
+                prev_base_ptr[j] = (prev_base_ptr[j] + next_base_ptr[j]) / 2;
+            }
+          }
+
           auto real_end = chunk_audio.end() - end_pad * 256;
           audioBuffer.insert(audioBuffer.end(), real_start, real_end);
           float chunk_audio_seconds = (double)chunk_audio.size() / (double)voice.synthesisConfig.sampleRate;
