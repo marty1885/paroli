@@ -420,11 +420,12 @@ void EncoderInferer::load(std::string path)
                              instanceName.c_str());
     env.DisableTelemetryEvents();
     
-    options.SetGraphOptimizationLevel(
-        GraphOptimizationLevel::ORT_DISABLE_ALL);
+    //options.SetGraphOptimizationLevel(
+    //    GraphOptimizationLevel::ORT_DISABLE_ALL);
     
     //options.DisableCpuMemArena();
     //options.DisableMemPattern();
+    options.SetExecutionMode(ExecutionMode::ORT_PARALLEL);
     onnx = Ort::Session(env, path.c_str(), options);
 }
 

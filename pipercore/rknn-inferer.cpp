@@ -7,6 +7,14 @@
 #include <xtensor/xadapt.hpp>
 #include <xtensor/xio.hpp>
 
+template <typename T>
+struct Defer
+{
+    Defer(T&& f) : f(std::move(f)) {}
+    ~Defer() { f(); }
+    T f;
+};
+
 static std::vector<uint8_t> loadModel(std::string modelPath)
 {
     std::ifstream ifs(modelPath, std::ios::binary);
@@ -27,6 +35,12 @@ static std::vector<uint8_t> loadModel(std::string modelPath)
     return buf;
 }
 
+RknnDecoderInferer::~RknnDecoderInferer()
+{
+    if (ctx)
+        rknn_destroy(ctx);
+}
+
 void RknnDecoderInferer::load(std::string modelPath)
 {
     auto model = loadModel(modelPath);
@@ -34,7 +48,7 @@ void RknnDecoderInferer::load(std::string modelPath)
         throw std::runtime_error("load model failed.");
 
     // enabling sram seems to help with reducing the variance of inference time. no hard evidence though.
-    auto ret = rknn_init(&ctx, model.data(), model.size(), RKNN_FLAG_ENABLE_SRAM, nullptr);
+    auto ret = rknn_init(&ctx, model.data(), model.size(), 0, nullptr);
     if (ret != RKNN_SUCC)
         throw std::runtime_error("rknn_init failed. Error code: " + std::to_string(ret));
 
@@ -117,6 +131,8 @@ std::vector<int16_t> RknnDecoderInferer::infer(const xt::xarray<float>& z, const
         throw std::runtime_error("rknn_run failed. Error code: " + std::to_string(ret));
 
     ret = rknn_outputs_get(ctx, output_attrs.size(), outputs.data(), nullptr);
+    // FIXME: This is not super safe. But avoids memory allocation.
+    Defer defer([this]() { rknn_outputs_release(ctx, output_attrs.size(), outputs.data()); });
     if (ret != RKNN_SUCC)
         throw std::runtime_error("rknn_outputs_get failed. Error code: " + std::to_string(ret));
 
