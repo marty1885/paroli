@@ -7,6 +7,8 @@
 #include <xtensor/xadapt.hpp>
 #include <xtensor/xio.hpp>
 
+#include <cassert>
+
 template <typename T>
 struct Defer
 {
@@ -35,25 +37,18 @@ static std::vector<uint8_t> loadModel(std::string modelPath)
     return buf;
 }
 
-RknnDecoderInferer::~RknnDecoderInferer()
+RknnDecoderInfererImpl::~RknnDecoderInfererImpl()
 {
     if (ctx)
         rknn_destroy(ctx);
 }
 
-void RknnDecoderInferer::load(std::string modelPath)
+RknnDecoderInfererImpl::RknnDecoderInfererImpl(rknn_context ctx)
+    : ctx(ctx)
 {
-    auto model = loadModel(modelPath);
-    if (model.empty())
-        throw std::runtime_error("load model failed.");
-
-    // enabling sram seems to help with reducing the variance of inference time. no hard evidence though.
-    auto ret = rknn_init(&ctx, model.data(), model.size(), 0, nullptr);
-    if (ret != RKNN_SUCC)
-        throw std::runtime_error("rknn_init failed. Error code: " + std::to_string(ret));
-
+    assert(ctx != 0);
     rknn_input_output_num io_num;
-    ret = rknn_query(ctx, RKNN_QUERY_IN_OUT_NUM, &io_num, sizeof(io_num));
+    auto ret = rknn_query(ctx, RKNN_QUERY_IN_OUT_NUM, &io_num, sizeof(io_num));
     if (ret != RKNN_SUCC)
         throw std::runtime_error("rknn_query failed. Error code: " + std::to_string(ret));
 
@@ -67,7 +62,7 @@ void RknnDecoderInferer::load(std::string modelPath)
     memset(inputs.data(), 0, sizeof(rknn_input) * io_num.n_input);
     memset(outputs.data(), 0, sizeof(rknn_output) * io_num.n_output);
 
-    spdlog::info("input num: {}, output num: {}", io_num.n_input, io_num.n_output);
+    // spdlog::debug("input num: {}, output num: {}", io_num.n_input, io_num.n_output);
     for(int i = 0; i < io_num.n_input; i++)
     {
         input_attrs[i].index = i;
@@ -85,7 +80,7 @@ void RknnDecoderInferer::load(std::string modelPath)
     }
 }
 
-std::vector<int16_t> RknnDecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g)
+std::vector<int16_t> RknnDecoderInfererImpl::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g)
 {
     std::vector<const xt::xarray<float>*> sources = {&z, &y_mask, &g};
     std::vector<xt::xarray<float>> reshaped_sources;
@@ -151,4 +146,70 @@ std::vector<int16_t> RknnDecoderInferer::infer(const xt::xarray<float>& z, const
         out[i] = static_cast<int16_t>(val);
     }
     return out;
+}
+
+RknnDecoderInfererImpl::RknnDecoderInfererImpl(RknnDecoderInfererImpl&& other)
+    : ctx(other.ctx)
+    , input_attrs(std::move(other.input_attrs))
+    , output_attrs(std::move(other.output_attrs))
+    , inputs(std::move(other.inputs))
+    , outputs(std::move(other.outputs))
+{
+    other.ctx = 0;
+}
+
+void RknnDecoderInferer::load(std::string modelPath)
+{
+    auto model = loadModel(modelPath);
+    if (model.empty())
+        throw std::runtime_error("load model failed.");
+
+    // enabling sram seems to help with reducing the variance of inference time. no hard evidence though.
+    rknn_context ctx;
+    auto ret = rknn_init(&ctx, model.data(), model.size(), 0, nullptr);
+    if (ret != RKNN_SUCC)
+        throw std::runtime_error("rknn_init failed. Error code: " + std::to_string(ret));
+
+    // I don't know why, but duplicating the context seems to only work before start messing with the context.
+    // 3 because the RK3588 has 3 NPU cores.
+    rknn_context dup_ctx[3];
+    dup_ctx[0] = ctx;
+    for(int i = 1; i < 3; i++) {
+        memset(&dup_ctx[i], 0, sizeof(dup_ctx[i]));
+        ret = rknn_dup_context(&ctx, &dup_ctx[i]);
+        if (ret != RKNN_SUCC)
+            throw std::runtime_error("rknn_dup_context failed. Error code: " + std::to_string(ret));
+    }
+
+    for(int i = 0; i < 3; i++) {
+        impls.emplace_back(RknnDecoderInfererImpl(dup_ctx[i]));
+    }
+
+    implTracker = {0, 0, 0};
+}
+
+std::vector<int16_t> RknnDecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g)
+{
+    int idx = 0;
+    do {
+        std::unique_lock<std::mutex> lock(mtx);
+        auto it = std::find(implTracker.begin(), implTracker.end(), 0);
+        if (it != implTracker.end()) {
+            idx = std::distance(implTracker.begin(), it);
+            implTracker[idx] = 1;
+            break;
+        }
+        cv.wait(lock, [this]() { return flag; });
+        it = std::find(implTracker.begin(), implTracker.end(), 0);
+        assert(it != implTracker.end());
+        idx = std::distance(implTracker.begin(), it);
+    } while(false);
+    auto& inferer = impls[idx];
+    auto ret = inferer.infer(z, y_mask, g);
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        implTracker[idx] = 0;
+        cv.notify_one();
+    }
+    return ret;
 }
