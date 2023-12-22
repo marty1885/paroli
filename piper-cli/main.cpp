@@ -94,10 +94,6 @@ struct RunConfig {
 };
 
 void parseArgs(int argc, char *argv[], RunConfig &runConfig);
-void rawOutputProc(vector<int16_t> &sharedAudioBuffer, mutex &mutAudio,
-                   condition_variable &cvAudio, bool &audioReady,
-                   bool &audioFinished);
-
 // ----------------------------------------------------------------------------
 
 int main(int argc, char *argv[]) {
@@ -171,21 +167,24 @@ int main(int argc, char *argv[]) {
   }
 
   // Enable libtashkeel for Arabic
-  if (voice.phonemizeConfig.eSpeak.voice == "ar") {
+  if (runConfig.tashkeelModelPath) {
+    // User provided path
+    piperConfig.tashkeelModelPath =
+        runConfig.tashkeelModelPath.value().string();
     piperConfig.useTashkeel = true;
-    if (runConfig.tashkeelModelPath) {
-      // User provided path
-      piperConfig.tashkeelModelPath =
-          runConfig.tashkeelModelPath.value().string();
-    } else {
-      // Assume next to piper executable
-      piperConfig.tashkeelModelPath =
-          std::filesystem::absolute(
-              exePath.parent_path().append("libtashkeel_model.ort"))
-              .string();
-
-      spdlog::debug("libtashkeel model is expected at {}",
-                    piperConfig.tashkeelModelPath.value());
+  } else {
+    // Assume next to piper executable
+    auto defaultPath = std::filesystem::absolute(
+        exePath.parent_path().append("libtashkeel_model.ort"));
+    if(std::filesystem::exists(defaultPath)){
+      spdlog::debug("Using default libtashkeel model at {}",
+                    defaultPath.string());
+      piperConfig.tashkeelModelPath = defaultPath.string();
+      piperConfig.useTashkeel = true;
+    }
+    else {
+      spdlog::debug("Cannot find default libtashkeel model at {}. Please provide one else Arabic text will not work",
+                  defaultPath.string());
     }
   }
 
@@ -313,47 +312,24 @@ int main(int argc, char *argv[]) {
       piper::textToWavFile(piperConfig, voice, line, cout, result);
     } else if (outputType == OUTPUT_RAW) {
       // Raw output to stdout
-      mutex mutAudio;
-      condition_variable cvAudio;
-      bool audioReady = false;
-      bool audioFinished = false;
       vector<int16_t> audioBuffer;
-      vector<int16_t> sharedAudioBuffer;
-
 #ifdef _WIN32
       // Needed on Windows to avoid terminal conversions
       setmode(fileno(stdout), O_BINARY);
       setmode(fileno(stdin), O_BINARY);
 #endif
 
-      thread rawOutputThread(rawOutputProc, ref(sharedAudioBuffer),
-                             ref(mutAudio), ref(cvAudio), ref(audioReady),
-                             ref(audioFinished));
-      auto audioCallback = [&audioBuffer, &sharedAudioBuffer, &mutAudio,
-                            &cvAudio, &audioReady]() {
+      auto audioCallback = [&audioBuffer]() {
         // Signal thread that audio is ready
-        {
-          unique_lock lockAudio(mutAudio);
-          copy(audioBuffer.begin(), audioBuffer.end(),
-               back_inserter(sharedAudioBuffer));
-          audioReady = true;
-          cvAudio.notify_one();
-        }
+        cout.write((const char *)audioBuffer.data(),
+                   sizeof(int16_t) * audioBuffer.size());
+        cout.flush();
       };
       piper::textToAudio(piperConfig, voice, line, audioBuffer, result,
                          audioCallback);
 
-      // Signal thread that there is no more audio
-      {
-        unique_lock lockAudio(mutAudio);
-        audioReady = true;
-        audioFinished = true;
-        cvAudio.notify_one();
-      }
-
       // Wait for audio output to finish
       spdlog::info("Waiting for audio to finish playing...");
-      rawOutputThread.join();
     }
 
     spdlog::info("Real-time factor: {} (infer={} sec, audio={} sec)",
@@ -369,39 +345,6 @@ int main(int argc, char *argv[]) {
 
   return EXIT_SUCCESS;
 }
-
-// ----------------------------------------------------------------------------
-
-void rawOutputProc(vector<int16_t> &sharedAudioBuffer, mutex &mutAudio,
-                   condition_variable &cvAudio, bool &audioReady,
-                   bool &audioFinished) {
-  vector<int16_t> internalAudioBuffer;
-  while (true) {
-    {
-      unique_lock lockAudio{mutAudio};
-      cvAudio.wait(lockAudio, [&audioReady] { return audioReady; });
-
-      if (sharedAudioBuffer.empty() && audioFinished) {
-        break;
-      }
-
-      copy(sharedAudioBuffer.begin(), sharedAudioBuffer.end(),
-           back_inserter(internalAudioBuffer));
-
-      sharedAudioBuffer.clear();
-
-      if (!audioFinished) {
-        audioReady = false;
-      }
-    }
-
-    cout.write((const char *)internalAudioBuffer.data(),
-               sizeof(int16_t) * internalAudioBuffer.size());
-    cout.flush();
-    internalAudioBuffer.clear();
-  }
-
-} // rawOutputProc
 
 // ----------------------------------------------------------------------------
 

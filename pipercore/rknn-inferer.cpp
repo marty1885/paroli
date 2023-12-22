@@ -201,6 +201,7 @@ std::vector<int16_t> RknnDecoderInferer::infer(const xt::xarray<float>& z, const
         }
         cv.wait(lock, [this]() { return flag; });
         it = std::find(implTracker.begin(), implTracker.end(), 0);
+        flag = false;
         assert(it != implTracker.end());
         idx = std::distance(implTracker.begin(), it);
     } while(false);
@@ -209,6 +210,7 @@ std::vector<int16_t> RknnDecoderInferer::infer(const xt::xarray<float>& z, const
     {
         std::lock_guard<std::mutex> lock(mtx);
         implTracker[idx] = 0;
+        flag = true;
         cv.notify_one();
     }
     return ret;

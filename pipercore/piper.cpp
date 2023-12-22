@@ -626,6 +626,7 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
                  std::vector<int16_t> &audioBuffer, SynthesisResult &result,
                  const std::function<void()> &audioCallback) {
 
+  std::cout << (bool)audioCallback << std::endl;
   std::size_t sentenceSilenceSamples = 0;
   if (voice.synthesisConfig.sentenceSilenceSeconds > 0) {
     sentenceSilenceSamples = (std::size_t)(
@@ -804,7 +805,8 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
           constexpr size_t compare_window = 24;
           constexpr size_t search_window = 44;
           static_assert(compare_window < search_window, "compare_window must be less than search_window");
-          if(audioBuffer.size() > compare_window && chunk_audio.size() > search_window * 2) {
+          const bool do_depop = audioBuffer.size() > compare_window && chunk_audio.size() > search_window * 2;
+          if(do_depop) {
             auto prev_chunk_end = audioBuffer.end() - compare_window;
             auto next_chunk_start = real_start;
             next_chunk_start -= std::min(std::distance(chunk_audio.begin(), next_chunk_start), (ptrdiff_t)compare_window);
@@ -826,21 +828,21 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
             for(size_t j=0;j<compare_window;j++) {
                 prev_base_ptr[j] = (prev_base_ptr[j] + next_base_ptr[j]) / 2;
             }
-
-            // Call the callback (if any) before we write the audio
-            // This has to be here because we modify the audio buffer
-            // above.
-            // TODO: This is ugly. Fix it.
-            if(audioCallback) {
-              audioCallback();
-              audioBuffer.clear();
-            }
           }
 
           auto real_end = chunk_audio.end() - end_pad * 256;
           audioBuffer.insert(audioBuffer.end(), real_start, real_end);
           float chunk_audio_seconds = (double)chunk_audio.size() / (double)voice.synthesisConfig.sampleRate;
           float chunk_infer_seconds = std::chrono::duration<double>(t1 - t0).count();
+
+          if(audioCallback && audioBuffer.size() > compare_window) {
+            std::vector<int16_t> tmp;
+            tmp.insert(tmp.end(), audioBuffer.begin(), audioBuffer.end() - compare_window);
+            audioBuffer.resize(compare_window);
+            audioCallback();
+            audioBuffer.resize(tmp.size());
+            memcpy(audioBuffer.data(), tmp.data(), tmp.size() * sizeof(int16_t));
+          }
 
           audioSeconds += chunk_audio_seconds;
           inferSeconds += chunk_infer_seconds;
