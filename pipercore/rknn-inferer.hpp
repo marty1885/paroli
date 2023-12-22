@@ -32,5 +32,5 @@ struct RknnDecoderInferer : public DecoderInferer {
   bool flag = false;
 
   std::vector<int16_t> infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g) override;
-  void load(std::string modelPath) override;
+  void load(std::string modelPath, std::string accelerator) override;
 };

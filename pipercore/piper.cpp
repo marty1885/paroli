@@ -270,7 +270,7 @@ void terminate(PiperConfig &config) {
 void loadVoice(PiperConfig &config, std::string modelPath,
                std::string encoderPath, std::string decoderPath,
                std::string modelConfigPath, Voice &voice,
-               std::optional<SpeakerId> &speakerId, bool useCuda) {
+               std::optional<SpeakerId> &speakerId, std::string accelerator) {
   spdlog::debug("Parsing voice config at {}", modelConfigPath);
   std::ifstream modelConfigFile(modelConfigPath);
   voice.configRoot = json::parse(modelConfigFile);
@@ -291,7 +291,7 @@ void loadVoice(PiperConfig &config, std::string modelPath,
 
   spdlog::debug("Voice contains {} speaker(s)", voice.modelConfig.numSpeakers);
 
-  voice.encoder.load(encoderPath);
+  voice.encoder.load(encoderPath, accelerator);
 
   // TODO: Parse wtih std::filesystem
   auto extension = std::filesystem::path(decoderPath).extension();
@@ -299,19 +299,23 @@ void loadVoice(PiperConfig &config, std::string modelPath,
       voice.decoder = std::make_unique<RknnDecoderInferer>();
   else
       voice.decoder = std::make_unique<OnnxDecoderInferer>();
-  voice.decoder->load(decoderPath);
+  voice.decoder->load(decoderPath, accelerator);
 
 } /* loadVoice */
 
-void OnnxDecoderInferer::load(std::string path)
+void OnnxDecoderInferer::load(std::string path, std::string accelerator)
 {
     spdlog::debug("Loading decoder onnx model from {}", path);
     env = Ort::Env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING,
                              instanceName.c_str());
     env.DisableTelemetryEvents();
     
-    options.SetGraphOptimizationLevel(
-        GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+    if (accelerator == "cuda") {
+      // Use CUDA provider
+      OrtCUDAProviderOptions cuda_options{};
+      cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchHeuristic;
+      options.AppendExecutionProvider_CUDA(cuda_options);
+    }
     
     //options.DisableCpuMemArena();
     //options.DisableMemPattern();
@@ -367,7 +371,7 @@ std::vector<int16_t> OnnxDecoderInferer::infer(const xt::xarray<float>& z, const
 }
 
 
-void EncoderInferer::load(std::string path)
+void EncoderInferer::load(std::string path, std::string accelerator)
 {
     spdlog::debug("Loading encoder onnx model from {}", path);
     env = Ort::Env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING,
@@ -377,8 +381,7 @@ void EncoderInferer::load(std::string path)
     options.SetGraphOptimizationLevel(
         GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
     options.DisableProfiling();
-    // TODO: Allow CUDA
-    if (false) {
+    if (accelerator == "cuda") {
       // Use CUDA provider
       OrtCUDAProviderOptions cuda_options{};
       cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchHeuristic;
@@ -479,6 +482,7 @@ std::map<std::string, xt::xarray<float>> EncoderInferer::infer(const std::vector
 void textToAudio(PiperConfig &config, Voice &voice, std::string text,
                  std::vector<int16_t> &audioBuffer, SynthesisResult &result,
                  const std::function<void()> &audioCallback,
+                 std::optional<size_t> speakerId,
                  std::optional<float> noiseScale,
                  std::optional<float> lengthScale,
                  std::optional<float> noiseW) {
@@ -607,8 +611,11 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
 
       // ids -> audio
       auto encode_start = std::chrono::steady_clock::now();
+      std::optional<size_t> sid = speakerId;
+      if(!sid && voice.synthesisConfig.speakerId)
+        sid = voice.synthesisConfig.speakerId;
       auto params = voice.encoder.infer(phonemeIds, phrasePhonemes[phraseIdx]->size(),
-                          voice.synthesisConfig.speakerId,
+                          sid,
                           noiseScale.value_or(voice.synthesisConfig.noiseScale),
                           lengthScale.value_or(voice.synthesisConfig.lengthScale),
                           noiseW.value_or(voice.synthesisConfig.noiseW));
@@ -762,6 +769,7 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
 // Phonemize text and synthesize audio to WAV file
 void textToWavFile(PiperConfig &config, Voice &voice, std::string text,
                    std::ostream &audioFile, SynthesisResult &result,
+                   std::optional<size_t> speakerId,
                    std::optional<float> noiseScale,
                    std::optional<float> lengthScale,
                    std::optional<float> noiseW) {

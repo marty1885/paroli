@@ -158,8 +158,9 @@ RknnDecoderInfererImpl::RknnDecoderInfererImpl(RknnDecoderInfererImpl&& other)
     other.ctx = 0;
 }
 
-void RknnDecoderInferer::load(std::string modelPath)
+void RknnDecoderInferer::load(std::string modelPath, std::string accelerator)
 {
+    (void)accelerator; // ignored, this is for NPU
     auto model = loadModel(modelPath);
     if (model.empty())
         throw std::runtime_error("load model failed.");

@@ -91,7 +91,7 @@ struct EncoderInferer {
              float noiseScale,
              float lengthScale,
              float noiseW);
-  virtual void load(std::string modelPath);
+  virtual void load(std::string modelPath, std::string accelerator="");
 
   EncoderInferer() : onnx(nullptr){};
 };
@@ -103,7 +103,7 @@ struct OnnxDecoderInferer : DecoderInferer {
   Ort::Env env;
 
   std::vector<int16_t> infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g) override;
-  void load(std::string modelPath) override;
+  void load(std::string modelPath, std::string accelerator) override;
 
   OnnxDecoderInferer() : onnx(nullptr){};
 };
@@ -143,12 +143,13 @@ void terminate(PiperConfig &config);
 void loadVoice(PiperConfig &config, std::string modelPath,
                std::string encoderPath, std::string decoderPath,
                std::string modelConfigPath, Voice &voice,
-               std::optional<SpeakerId> &speakerId, bool useCuda);
+               std::optional<SpeakerId> &speakerId, std::string accelerator);
 
 // Phonemize text and synthesize audio
 void textToAudio(PiperConfig &config, Voice &voice, std::string text,
                  std::vector<int16_t> &audioBuffer, SynthesisResult &result,
                  const std::function<void()> &audioCallback,
+                 std::optional<size_t> speakerId = std::nullopt,
                  std::optional<float> noiseScale = std::nullopt,
                  std::optional<float> lengthScale = std::nullopt,
                  std::optional<float> noiseW = std::nullopt);
@@ -156,6 +157,7 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
 // Phonemize text and synthesize audio to WAV file
 void textToWavFile(PiperConfig &config, Voice &voice, std::string text,
                    std::ostream &audioFile, SynthesisResult &result,
+                   std::optional<size_t> speakerId = std::nullopt,
                    std::optional<float> noiseScale = std::nullopt,
                    std::optional<float> lengthScale = std::nullopt,
                    std::optional<float> noiseW = std::nullopt);

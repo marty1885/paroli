@@ -15,6 +15,13 @@ Before building, you will need to fulfill the following dependencies
 (RKNN support)
 * rknnrt >= 1.6.0
 
+(API/Web server)
+* Drogon
+* libsoxr
+* libogg
+* libopus
+* libopusenc (You'll need to build this from source if on Ubuntu 22.04. Package avaliable starting on 23.04)
+
 In which `piper-phoenomize` and `onnxruntime` binary (not the source! Unless you want to build yourselves!) likely needs to be downloaded and decompressed manually. Afterwards run CMake and point to the folders you recompressed them.
 
 ```bash
