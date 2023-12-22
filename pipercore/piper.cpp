@@ -294,7 +294,8 @@ void loadVoice(PiperConfig &config, std::string modelPath,
   voice.encoder.load(encoderPath);
 
   // TODO: Parse wtih std::filesystem
-  if(decoderPath.rfind(".rknn") == decoderPath.size() - 5)
+  auto extension = std::filesystem::path(decoderPath).extension();
+  if(extension == ".rknn")
       voice.decoder = std::make_unique<RknnDecoderInferer>();
   else
       voice.decoder = std::make_unique<OnnxDecoderInferer>();
@@ -477,7 +478,10 @@ std::map<std::string, xt::xarray<float>> EncoderInferer::infer(const std::vector
 // Phonemize text and synthesize audio
 void textToAudio(PiperConfig &config, Voice &voice, std::string text,
                  std::vector<int16_t> &audioBuffer, SynthesisResult &result,
-                 const std::function<void()> &audioCallback) {
+                 const std::function<void()> &audioCallback,
+                 std::optional<float> noiseScale,
+                 std::optional<float> lengthScale,
+                 std::optional<float> noiseW) {
 
   std::cout << (bool)audioCallback << std::endl;
   std::size_t sentenceSilenceSamples = 0;
@@ -605,9 +609,9 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
       auto encode_start = std::chrono::steady_clock::now();
       auto params = voice.encoder.infer(phonemeIds, phrasePhonemes[phraseIdx]->size(),
                           voice.synthesisConfig.speakerId,
-                          voice.synthesisConfig.noiseScale,
-                          voice.synthesisConfig.lengthScale,
-                          voice.synthesisConfig.noiseW);
+                          noiseScale.value_or(voice.synthesisConfig.noiseScale),
+                          lengthScale.value_or(voice.synthesisConfig.lengthScale),
+                          noiseW.value_or(voice.synthesisConfig.noiseW));
       auto encode_end = std::chrono::steady_clock::now();
       float encode_seconds = std::chrono::duration<double>(encode_end - encode_start).count();
       auto& g = params["g"]; // g could be missing. TODO: Fix this
@@ -757,10 +761,14 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
 
 // Phonemize text and synthesize audio to WAV file
 void textToWavFile(PiperConfig &config, Voice &voice, std::string text,
-                   std::ostream &audioFile, SynthesisResult &result) {
+                   std::ostream &audioFile, SynthesisResult &result,
+                   std::optional<float> noiseScale,
+                   std::optional<float> lengthScale,
+                   std::optional<float> noiseW) {
 
   std::vector<int16_t> audioBuffer;
-  textToAudio(config, voice, text, audioBuffer, result, NULL);
+  textToAudio(config, voice, text, audioBuffer, result, NULL, noiseScale,
+              lengthScale, noiseW);
 
   // Write WAV
   auto synthesisConfig = voice.synthesisConfig;

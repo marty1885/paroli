@@ -148,11 +148,17 @@ void loadVoice(PiperConfig &config, std::string modelPath,
 // Phonemize text and synthesize audio
 void textToAudio(PiperConfig &config, Voice &voice, std::string text,
                  std::vector<int16_t> &audioBuffer, SynthesisResult &result,
-                 const std::function<void()> &audioCallback);
+                 const std::function<void()> &audioCallback,
+                 std::optional<float> noiseScale = std::nullopt,
+                 std::optional<float> lengthScale = std::nullopt,
+                 std::optional<float> noiseW = std::nullopt);
 
 // Phonemize text and synthesize audio to WAV file
 void textToWavFile(PiperConfig &config, Voice &voice, std::string text,
-                   std::ostream &audioFile, SynthesisResult &result);
+                   std::ostream &audioFile, SynthesisResult &result,
+                   std::optional<float> noiseScale = std::nullopt,
+                   std::optional<float> lengthScale = std::nullopt,
+                   std::optional<float> noiseW = std::nullopt);
 
 } // namespace piper
 
