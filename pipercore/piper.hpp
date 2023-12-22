@@ -79,15 +79,6 @@ struct ModelConfig {
   std::optional<std::map<std::string, SpeakerId>> speakerIdMap;
 };
 
-struct ModelSession {
-  Ort::Session onnx;
-  Ort::AllocatorWithDefaultOptions allocator;
-  Ort::SessionOptions options;
-  Ort::Env env;
-
-  ModelSession() : onnx(nullptr){};
-};
-
 struct EncoderInferer {
   Ort::Session onnx;
   Ort::AllocatorWithDefaultOptions allocator;
@@ -128,7 +119,6 @@ struct Voice {
   PhonemizeConfig phonemizeConfig;
   SynthesisConfig synthesisConfig;
   ModelConfig modelConfig;
-  ModelSession session;
 
   EncoderInferer encoder;
   std::unique_ptr<DecoderInferer> decoder;

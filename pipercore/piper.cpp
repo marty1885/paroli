@@ -266,52 +266,6 @@ void terminate(PiperConfig &config) {
   spdlog::info("Terminated piper");
 }
 
-void loadModel(std::string modelPath, ModelSession &session, bool useCuda) {
-  spdlog::debug("Loading onnx model from {}", modelPath);
-  session.env = Ort::Env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING,
-                         instanceName.c_str());
-  session.env.DisableTelemetryEvents();
-
-  if (useCuda) {
-    // Use CUDA provider
-    OrtCUDAProviderOptions cuda_options{};
-    cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchHeuristic;
-    session.options.AppendExecutionProvider_CUDA(cuda_options);
-  }
-
-  // Slows down performance by ~2x
-  // session.options.SetIntraOpNumThreads(1);
-
-  // Roughly doubles load time for no visible inference benefit
-  // session.options.SetGraphOptimizationLevel(
-  //     GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
-
-  session.options.SetGraphOptimizationLevel(
-      GraphOptimizationLevel::ORT_DISABLE_ALL);
-
-  // Slows down performance very slightly
-  // session.options.SetExecutionMode(ExecutionMode::ORT_PARALLEL);
-
-  session.options.DisableCpuMemArena();
-  session.options.DisableMemPattern();
-  session.options.DisableProfiling();
-
-  auto startTime = std::chrono::steady_clock::now();
-
-#ifdef _WIN32
-  auto modelPathW = std::wstring(modelPath.begin(), modelPath.end());
-  auto modelPathStr = modelPathW.c_str();
-#else
-  auto modelPathStr = modelPath.c_str();
-#endif
-
-  session.onnx = Ort::Session(session.env, modelPathStr, session.options);
-
-  auto endTime = std::chrono::steady_clock::now();
-  spdlog::debug("Loaded onnx model in {} second(s)",
-                std::chrono::duration<double>(endTime - startTime).count());
-}
-
 // Load Onnx model and JSON config file
 void loadVoice(PiperConfig &config, std::string modelPath,
                std::string encoderPath, std::string decoderPath,
@@ -337,7 +291,6 @@ void loadVoice(PiperConfig &config, std::string modelPath,
 
   spdlog::debug("Voice contains {} speaker(s)", voice.modelConfig.numSpeakers);
 
-  //loadModel(modelPath, voice.session, useCuda);
   voice.encoder.load(encoderPath);
 
   // TODO: Parse wtih std::filesystem
@@ -357,7 +310,7 @@ void OnnxDecoderInferer::load(std::string path)
     env.DisableTelemetryEvents();
     
     options.SetGraphOptimizationLevel(
-        GraphOptimizationLevel::ORT_DISABLE_ALL);
+        GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
     
     //options.DisableCpuMemArena();
     //options.DisableMemPattern();
@@ -420,12 +373,19 @@ void EncoderInferer::load(std::string path)
                              instanceName.c_str());
     env.DisableTelemetryEvents();
     
-    //options.SetGraphOptimizationLevel(
-    //    GraphOptimizationLevel::ORT_DISABLE_ALL);
+    options.SetGraphOptimizationLevel(
+        GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+    options.DisableProfiling();
+    // TODO: Allow CUDA
+    if (false) {
+      // Use CUDA provider
+      OrtCUDAProviderOptions cuda_options{};
+      cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchHeuristic;
+      options.AppendExecutionProvider_CUDA(cuda_options);
+    }
     
-    //options.DisableCpuMemArena();
-    //options.DisableMemPattern();
-    options.SetExecutionMode(ExecutionMode::ORT_PARALLEL);
+    // Makes encoder slower
+    //options.SetExecutionMode(ExecutionMode::ORT_PARALLEL);
     onnx = Ort::Session(env, path.c_str(), options);
 }
 
@@ -510,113 +470,6 @@ std::map<std::string, xt::xarray<float>> EncoderInferer::infer(const std::vector
 
   spdlog::debug("Encoder inference took {} seconds", inferSeconds);
   return output;
-}
-
-// Phoneme ids to WAV audio
-void synthesize(std::vector<PhonemeId> &phonemeIds,
-                SynthesisConfig &synthesisConfig, ModelSession &session,
-                std::vector<int16_t> &audioBuffer, SynthesisResult &result) {
-  spdlog::debug("Synthesizing audio for {} phoneme id(s)", phonemeIds.size());
-
-  auto memoryInfo = Ort::MemoryInfo::CreateCpu(
-      OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
-
-  // Allocate
-  std::vector<int64_t> phonemeIdLengths{(int64_t)phonemeIds.size()};
-  std::vector<float> scales{synthesisConfig.noiseScale,
-                            synthesisConfig.lengthScale,
-                            synthesisConfig.noiseW};
-
-  std::vector<Ort::Value> inputTensors;
-  std::vector<int64_t> phonemeIdsShape{1, (int64_t)phonemeIds.size()};
-  inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(
-      memoryInfo, phonemeIds.data(), phonemeIds.size(), phonemeIdsShape.data(),
-      phonemeIdsShape.size()));
-
-  std::vector<int64_t> phomemeIdLengthsShape{(int64_t)phonemeIdLengths.size()};
-  inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(
-      memoryInfo, phonemeIdLengths.data(), phonemeIdLengths.size(),
-      phomemeIdLengthsShape.data(), phomemeIdLengthsShape.size()));
-
-  std::vector<int64_t> scalesShape{(int64_t)scales.size()};
-  inputTensors.push_back(
-      Ort::Value::CreateTensor<float>(memoryInfo, scales.data(), scales.size(),
-                                      scalesShape.data(), scalesShape.size()));
-
-  // Add speaker id.
-  // NOTE: These must be kept outside the "if" below to avoid being deallocated.
-  std::vector<int64_t> speakerId{
-      (int64_t)synthesisConfig.speakerId.value_or(0)};
-  std::vector<int64_t> speakerIdShape{(int64_t)speakerId.size()};
-
-  if (synthesisConfig.speakerId) {
-    inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(
-        memoryInfo, speakerId.data(), speakerId.size(), speakerIdShape.data(),
-        speakerIdShape.size()));
-  }
-
-  // From export_onnx.py
-  std::array<const char *, 4> inputNames = {"input", "input_lengths", "scales",
-                                            "sid"};
-  std::array<const char *, 1> outputNames = {"output"};
-
-  // Infer
-  auto startTime = std::chrono::steady_clock::now();
-  auto outputTensors = session.onnx.Run(
-      Ort::RunOptions{nullptr}, inputNames.data(), inputTensors.data(),
-      inputTensors.size(), outputNames.data(), outputNames.size());
-  auto endTime = std::chrono::steady_clock::now();
-
-  if ((outputTensors.size() != 1) || (!outputTensors.front().IsTensor())) {
-    throw std::runtime_error("Invalid output tensors");
-  }
-  auto inferDuration = std::chrono::duration<double>(endTime - startTime);
-  result.inferSeconds = inferDuration.count();
-
-  const float *audio = outputTensors.front().GetTensorData<float>();
-  auto audioShape =
-      outputTensors.front().GetTensorTypeAndShapeInfo().GetShape();
-  int64_t audioCount = audioShape[audioShape.size() - 1];
-
-  result.audioSeconds = (double)audioCount / (double)synthesisConfig.sampleRate;
-  result.realTimeFactor = 0.0;
-  if (result.audioSeconds > 0) {
-    result.realTimeFactor = result.inferSeconds / result.audioSeconds;
-  }
-  spdlog::debug("Synthesized {} second(s) of audio in {} second(s)",
-                result.audioSeconds, result.inferSeconds);
-
-  // Get max audio value for scaling
-  float maxAudioValue = 0.01f;
-  for (int64_t i = 0; i < audioCount; i++) {
-    float audioValue = abs(audio[i]);
-    if (audioValue > maxAudioValue) {
-      maxAudioValue = audioValue;
-    }
-  }
-
-  // We know the size up front
-  audioBuffer.reserve(audioCount);
-
-  // Scale audio to fill range and convert to int16
-  float audioScale = (MAX_WAV_VALUE / std::max(0.01f, maxAudioValue));
-  for (int64_t i = 0; i < audioCount; i++) {
-    int16_t intAudioValue = static_cast<int16_t>(
-        std::clamp(audio[i] * audioScale,
-                   static_cast<float>(std::numeric_limits<int16_t>::min()),
-                   static_cast<float>(std::numeric_limits<int16_t>::max())));
-
-    audioBuffer.push_back(intAudioValue);
-  }
-
-  // Clean up
-  for (std::size_t i = 0; i < outputTensors.size(); i++) {
-    Ort::detail::OrtRelease(outputTensors[i].release());
-  }
-
-  for (std::size_t i = 0; i < inputTensors.size(); i++) {
-    Ort::detail::OrtRelease(inputTensors[i].release());
-  }
 }
 
 // ----------------------------------------------------------------------------
@@ -749,8 +602,6 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
       }
 
       // ids -> audio
-      //synthesize(phonemeIds, voice.synthesisConfig, voice.session, audioBuffer,
-      //           phraseResults[phraseIdx]);
       auto encode_start = std::chrono::steady_clock::now();
       auto params = voice.encoder.infer(phonemeIds, phrasePhonemes[phraseIdx]->size(),
                           voice.synthesisConfig.speakerId,
