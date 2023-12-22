@@ -216,6 +216,7 @@ int main(int argc, char *argv[]) {
 
   app().addListener(runConfig.ip, runConfig.port)
       .setThreadNum(3)
+      .setDocumentRoot("../piper-server/web-content")
       .run();
 
   piper::terminate(piperConfig);

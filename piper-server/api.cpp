@@ -17,7 +17,7 @@ extern piper::Voice voice;
 template<typename Func>
 requires std::is_invocable_v<Func, const std::span<const short>>
 [[nodiscard]]
-auto speak(const std::string& text, size_t speaker_id, Func cb, std::optional<float> length_scale
+auto speak(const std::string& text, std::optional<size_t> speaker_id, Func cb, std::optional<float> length_scale
         , std::optional<float> noise_scale, std::optional<float> noise_w) -> bool
 {
     std::vector<short> audioBuffer;
@@ -195,12 +195,14 @@ void v1ws::handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string
         return;
     }
 
-    bool ok = speak(params.text, params.speaker_id.value_or(0), [&wsConnPtr](const std::span<const short> view) {
+    bool ok = speak(params.text, params.speaker_id, [&wsConnPtr](const std::span<const short> view) {
+        if(view.empty())
+            return;
         auto pcm = resample(view, voice.synthesisConfig.sampleRate, 24000, 1);
         //auto opus = encodeOgg(pcm, 24000, 1);
 
         // TODO: Fix Big Endian support
-        wsConnPtr->send((char*)pcm.data(), pcm.size(), WebSocketMessageType::Binary);
+        wsConnPtr->send((char*)pcm.data(), pcm.size() * sizeof(int16_t), WebSocketMessageType::Binary);
     }, params.length_scale, params.noise_scale, params.noise_w);
     if(!ok) {
         wsConnPtr->send("ERROR: Failed to synthesise");
@@ -230,7 +232,7 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
 
     std::vector<short> audio;
     audio.reserve(voice.synthesisConfig.sampleRate); // reserve some to reduce reallocation
-    bool ok = speak(params.text, params.speaker_id.value_or(0), [&audio](std::span<const short> view) {
+    bool ok = speak(params.text, params.speaker_id, [&audio](std::span<const short> view) {
         auto old_size = audio.size();
         audio.resize(old_size + view.size());
         std::copy(view.begin(), view.end(), audio.begin() + old_size);
