@@ -684,14 +684,14 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
           constexpr size_t compare_window = 24;
           constexpr size_t search_window = 44;
           static_assert(compare_window < search_window, "compare_window must be less than search_window");
-          const bool do_depop = audioBuffer.size() >= compare_window && chunk_audio.size() > search_window * 2;
+          const bool do_depop = audioBuffer.size() >= compare_window && chunk_audio.size() >= search_window * 2;
           if(do_depop) {
             auto prev_chunk_end = audioBuffer.end() - compare_window;
             auto next_chunk_start = real_start;
             next_chunk_start -= std::min(std::distance(chunk_audio.begin(), next_chunk_start), (ptrdiff_t)compare_window);
             size_t min_diff = std::numeric_limits<size_t>::max();
             // increment by 4 to speed up the search
-            for(size_t j=0;j<search_window*2;j+=4) {
+            for(size_t j=0;j<search_window*2;j+=2) {
               size_t diff = 0;
               for(size_t k=0;k<compare_window;k++) {
                 diff += std::abs(prev_chunk_end[k] - next_chunk_start[j+k]);
