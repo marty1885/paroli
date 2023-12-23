@@ -14,6 +14,8 @@ using namespace drogon;
 extern piper::PiperConfig piperConfig;
 extern piper::Voice voice;
 extern std::string authToken;
+trantor::EventLoopThreadPool synthesizerThreadPool(3, "synehesizer thread pool");
+std::atomic<size_t> synthesizerThreadIndex = 0;
 
 template<typename Func>
 requires std::is_invocable_v<Func, const std::span<const short>>
@@ -196,6 +198,10 @@ namespace api
 {
 struct v1 : public HttpController<v1>
 {
+    v1()
+    {
+        synthesizerThreadPool.start();
+    }
     METHOD_LIST_BEGIN
     METHOD_ADD(v1::synthesise, "/synthesise", {Post, Options});
     METHOD_ADD(v1::speakers, "/speakers", Get);
@@ -210,6 +216,9 @@ struct v1ws : public WebSocketController<v1ws>
    void handleNewConnection(const HttpRequestPtr& req, const WebSocketConnectionPtr& wsConnPtr) override;
    void handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string&& message, const WebSocketMessageType& type) override;
    void handleConnectionClosed(const WebSocketConnectionPtr& wsConnPtr) override {}
+
+
+   Task<> handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string message, WebSocketMessageType type);
    WS_PATH_LIST_BEGIN
    WS_PATH_ADD("/api/v1/stream", Get);
    WS_PATH_LIST_END
@@ -228,8 +237,18 @@ void v1ws::handleNewConnection(const HttpRequestPtr& req, const WebSocketConnect
 
 void v1ws::handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string&& message, const WebSocketMessageType& type)
 {
+    // yeah yeah this can be raced even with atomic. I don't care not be deal
+    int index = synthesizerThreadIndex++;
+    if(index >= synthesizerThreadPool.size())
+        index = 0;
+    synthesizerThreadPool.getLoop(index)->queueInLoop(async_func([=, this]() mutable -> Task<> {
+        co_await handleNewMessageAsync(wsConnPtr, std::move(message), type);
+    }));
+}
+Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string message, WebSocketMessageType type)
+{
     if(type != WebSocketMessageType::Text)
-        return;
+        co_return;
 
     SynthesisApiParams params;
     try {
@@ -237,7 +256,7 @@ void v1ws::handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string
     }
     catch (const std::exception& e) {
         wsConnPtr->send("ERROR: " + std::string(e.what()));
-        return;
+        co_return;
     }
     bool send_opus = params.audio_format.value_or("opus") == "opus";
 
@@ -257,7 +276,8 @@ void v1ws::handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string
 
     if(!ok) {
         wsConnPtr->send("ERROR: Failed to synthesise");
-        return;
+        co_return;
+
     }
     if(send_opus) {
         auto opus = encoder.finish();
@@ -283,6 +303,12 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
         if(auth.empty() || auth != "Bearer " + authToken)
             co_return makeBadRequestResponse("Invalid Authorization");
     }
+
+    int id = synthesizerThreadIndex++;
+    if(synthesizerThreadIndex >= synthesizerThreadPool.size())
+        synthesizerThreadIndex = 0;
+    auto loop = synthesizerThreadPool.getLoop(id);
+    co_await switchThreadCoro(loop);
 
 
     SynthesisApiParams params;
