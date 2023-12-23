@@ -60,6 +60,10 @@ And to invoke TSS
 curl http://your.server.address:8848/api/v1/synthesise -X POST -H 'Content-Type: application/json' -d '{"text": "To be or not to be, that is the question"}' > test.opus
 ```
 
+Demo:
+
+[![Watch the video](https://img.youtube.com/vi/QkIF9FBrAM8/maxresdefault.jpg)](https://youtu.be/QkIF9FBrAM8)
+
 #### Authentication
 
 To enable use cases where the service is exposed for whatever reason. The API server supports a basic authentication scheme. The `--auth` flag will generate a bearer token that is different every time and both websocket and HTTP synthesis API will only work if enabled. `--auth [YOUR_TOKEN]` will set the token to YOUR_TOKEN. Furthermore setting the `PAROLI_TOKEN` enviroment variable will set the bearer token to whatever the enviroment variable is set to.
