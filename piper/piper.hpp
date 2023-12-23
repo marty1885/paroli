@@ -1,5 +1,4 @@
-#ifndef PIPER_H_
-#define PIPER_H_
+#pragma once
 
 #include <fstream>
 #include <functional>
@@ -163,6 +162,4 @@ void textToWavFile(PiperConfig &config, Voice &voice, std::string text,
                    std::optional<float> noiseW = std::nullopt);
 
 } // namespace piper
-
-#endif // PIPER_H_
 

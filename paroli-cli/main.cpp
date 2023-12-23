@@ -31,11 +31,10 @@
 #include <nlohmann/json.hpp>
 #include "piper.hpp"
 
-#include <drogon/drogon.h>
-
 using namespace std;
-using namespace drogon;
 using json = nlohmann::json;
+
+enum OutputType { OUTPUT_FILE, OUTPUT_DIRECTORY, OUTPUT_STDOUT, OUTPUT_RAW };
 
 struct RunConfig {
   // Path to .onnx encoder model
@@ -46,6 +45,13 @@ struct RunConfig {
 
   // Path to JSON voice config file
   filesystem::path modelConfigPath;
+
+  // Type of output to produce.
+  // Default is to write a WAV file in the current directory.
+  OutputType outputType = OUTPUT_DIRECTORY;
+
+  // Path for output
+  optional<filesystem::path> outputPath = filesystem::path(".");
 
   // Numerical id of the default speaker (multi-speaker voices)
   optional<piper::SpeakerId> speakerId;
@@ -69,28 +75,28 @@ struct RunConfig {
   // https://github.com/mush42/libtashkeel/
   optional<filesystem::path> tashkeelModelPath;
 
+  // stdin input is lines of JSON instead of text with format:
+  // {
+  //   "text": str,               (required)
+  //   "speaker_id": int,         (optional)
+  //   "speaker": str,            (optional)
+  //   "output_file": str,        (optional)
+  // }
+  bool jsonInput = false;
+
   // Seconds of extra silence to insert after a single phoneme
   optional<std::map<piper::Phoneme, float>> phonemeSilenceSeconds;
 
   // Set to whatever accelerator is available for ONNX. Ex: "cuda"
   // This has 0 affect if the underlying model is not handled by ONNX.
   std::string accelerator = "";
-
-  // IP address for the server to bind to
-  std::string ip = "127.0.0.1";
-
-  // Port for the server to bind to
-  uint16_t port = 8848;
 };
-
-piper::PiperConfig piperConfig;
-piper::Voice voice;
 
 void parseArgs(int argc, char *argv[], RunConfig &runConfig);
 // ----------------------------------------------------------------------------
 
 int main(int argc, char *argv[]) {
-  spdlog::set_default_logger(spdlog::stderr_color_st("piper"));
+  spdlog::set_default_logger(spdlog::stderr_color_st("paroli"));
   spdlog::set_level(spdlog::level::debug);
 
   RunConfig runConfig;
@@ -100,6 +106,9 @@ int main(int argc, char *argv[]) {
   // Required on Windows to show IPA symbols
   SetConsoleOutputCP(CP_UTF8);
 #endif
+
+  piper::PiperConfig piperConfig;
+  piper::Voice voice;
 
   spdlog::debug("Voice config: {}", runConfig.modelConfigPath.string());
   spdlog::debug("Encoder model: {}", runConfig.encoderPath.string());
@@ -214,10 +223,122 @@ int main(int argc, char *argv[]) {
 
   } // if phonemeSilenceSeconds
 
-  app().addListener(runConfig.ip, runConfig.port)
-      .setThreadNum(3)
-      .setDocumentRoot("../piper-server/web-content")
-      .run();
+  if (runConfig.outputType == OUTPUT_DIRECTORY) {
+    runConfig.outputPath = filesystem::absolute(runConfig.outputPath.value());
+    spdlog::info("Output directory: {}", runConfig.outputPath.value().string());
+  }
+
+  string line;
+  piper::SynthesisResult result;
+  while (getline(cin, line)) {
+    auto outputType = runConfig.outputType;
+    auto speakerId = voice.synthesisConfig.speakerId;
+    std::optional<filesystem::path> maybeOutputPath = runConfig.outputPath;
+
+    if (runConfig.jsonInput) {
+      // Each line is a JSON object
+      json lineRoot = json::parse(line);
+
+      // Text is required
+      line = lineRoot["text"].get<std::string>();
+
+      if (lineRoot.contains("output_file")) {
+        // Override output WAV file path
+        outputType = OUTPUT_FILE;
+        maybeOutputPath =
+            filesystem::path(lineRoot["output_file"].get<std::string>());
+      }
+
+      if (lineRoot.contains("speaker_id")) {
+        // Override speaker id
+        voice.synthesisConfig.speakerId =
+            lineRoot["speaker_id"].get<piper::SpeakerId>();
+      } else if (lineRoot.contains("speaker")) {
+        // Resolve to id using speaker id map
+        auto speakerName = lineRoot["speaker"].get<std::string>();
+        if ((voice.modelConfig.speakerIdMap) &&
+            (voice.modelConfig.speakerIdMap->count(speakerName) > 0)) {
+          voice.synthesisConfig.speakerId =
+              (*voice.modelConfig.speakerIdMap)[speakerName];
+        } else {
+          spdlog::warn("No speaker named: {}", speakerName);
+        }
+      }
+    }
+
+    // Timestamp is used for path to output WAV file
+    const auto now = chrono::system_clock::now();
+    const auto timestamp =
+        chrono::duration_cast<chrono::nanoseconds>(now.time_since_epoch())
+            .count();
+
+    if (outputType == OUTPUT_DIRECTORY) {
+      // Generate path using timestamp
+      stringstream outputName;
+      outputName << timestamp << ".wav";
+      filesystem::path outputPath = runConfig.outputPath.value();
+      outputPath.append(outputName.str());
+
+      // Output audio to automatically-named WAV file in a directory
+      ofstream audioFile(outputPath.string(), ios::binary);
+      piper::textToWavFile(piperConfig, voice, line, audioFile, result);
+      spdlog::info("Wrote {}", outputPath.string());
+    } else if (outputType == OUTPUT_FILE) {
+      if (!maybeOutputPath || maybeOutputPath->empty()) {
+        throw runtime_error("No output path provided");
+      }
+
+      filesystem::path outputPath = maybeOutputPath.value();
+
+      if (!runConfig.jsonInput) {
+        // Read all of standard input before synthesizing.
+        // Otherwise, we would overwrite the output file for each line.
+        stringstream text;
+        text << line;
+        while (getline(cin, line)) {
+          text << " " << line;
+        }
+
+        line = text.str();
+      }
+
+      // Output audio to WAV file
+      ofstream audioFile(outputPath.string(), ios::binary);
+      piper::textToWavFile(piperConfig, voice, line, audioFile, result);
+      cout << outputPath.string() << endl;
+    } else if (outputType == OUTPUT_STDOUT) {
+      // Output WAV to stdout
+      piper::textToWavFile(piperConfig, voice, line, cout, result);
+    } else if (outputType == OUTPUT_RAW) {
+      // Raw output to stdout
+      vector<int16_t> audioBuffer;
+#ifdef _WIN32
+      // Needed on Windows to avoid terminal conversions
+      setmode(fileno(stdout), O_BINARY);
+      setmode(fileno(stdin), O_BINARY);
+#endif
+
+      auto audioCallback = [&audioBuffer]() {
+        // Signal thread that audio is ready
+        cout.write((const char *)audioBuffer.data(),
+                   sizeof(int16_t) * audioBuffer.size());
+        cout.flush();
+      };
+      piper::textToAudio(piperConfig, voice, line, audioBuffer, result,
+                         audioCallback);
+
+      // Wait for audio output to finish
+      spdlog::info("Waiting for audio to finish playing...");
+    }
+
+    spdlog::info("Real-time factor: {} (infer={} sec, audio={} sec)",
+                 result.realTimeFactor, result.inferSeconds,
+                 result.audioSeconds);
+
+    // Restore config (--json-input)
+    voice.synthesisConfig.speakerId = speakerId;
+
+  } // for each line
 
   piper::terminate(piperConfig);
 
@@ -234,8 +355,6 @@ void printUsage(char *argv[]) {
   cerr << "   -h        --help              show this message and exit" << endl;
   cerr << "   --encoder FILE  path to encoder model file" << endl;
   cerr << "   --decoder FILE  path to decoder model file" << endl;
-  cerr << "   --ip      STR   ip address to bind to (default: 127.0.0.1" << endl;
-  cerr << "   --port    NUM   port to bind to (default: 8848)" << endl;
   cerr << "   -c  FILE  --config      FILE  path to model config file "
           "(default: model path + .json)"
        << endl;
@@ -244,6 +363,9 @@ void printUsage(char *argv[]) {
        << endl;
   cerr << "   -d  DIR   --output_dir  DIR   path to output directory (default: "
           "cwd)"
+       << endl;
+  cerr << "   --output_raw                  output raw audio to stdout as it "
+          "becomes available"
        << endl;
   cerr << "   -s  NUM   --speaker     NUM   id of speaker (default: 0)" << endl;
   cerr << "   --noise_scale           NUM   generator noise (default: 0.667)"
@@ -259,6 +381,9 @@ void printUsage(char *argv[]) {
        << endl;
   cerr << "   --tashkeel_model        FILE  path to libtashkeel onnx model "
           "(arabic)"
+       << endl;
+  cerr << "   --json-input                  stdin input is lines of JSON "
+          "instead of plain text"
        << endl;
   cerr << "   --accelerator           STR   accelerator to use for ONNX "
           "(default: none, valid: cuda)"
@@ -293,6 +418,23 @@ void parseArgs(int argc, char *argv[], RunConfig &runConfig) {
     } else if (arg == "-c" || arg == "--config") {
       ensureArg(argc, argv, i);
       modelConfigPath = filesystem::path(argv[++i]);
+    } else if (arg == "-f" || arg == "--output_file" ||
+               arg == "--output-file") {
+      ensureArg(argc, argv, i);
+      std::string filePath = argv[++i];
+      if (filePath == "-") {
+        runConfig.outputType = OUTPUT_STDOUT;
+        runConfig.outputPath = nullopt;
+      } else {
+        runConfig.outputType = OUTPUT_FILE;
+        runConfig.outputPath = filesystem::path(filePath);
+      }
+    } else if (arg == "-d" || arg == "--output_dir" || arg == "output-dir") {
+      ensureArg(argc, argv, i);
+      runConfig.outputType = OUTPUT_DIRECTORY;
+      runConfig.outputPath = filesystem::path(argv[++i]);
+    } else if (arg == "--output_raw" || arg == "--output-raw") {
+      runConfig.outputType = OUTPUT_RAW;
     } else if (arg == "-s" || arg == "--speaker") {
       ensureArg(argc, argv, i);
       runConfig.speakerId = (piper::SpeakerId)stol(argv[++i]);
@@ -331,6 +473,8 @@ void parseArgs(int argc, char *argv[], RunConfig &runConfig) {
     } else if (arg == "--tashkeel_model" || arg == "--tashkeel-model") {
       ensureArg(argc, argv, i);
       runConfig.tashkeelModelPath = filesystem::path(argv[++i]);
+    } else if (arg == "--json_input" || arg == "--json-input") {
+      runConfig.jsonInput = true;
     } else if (arg == "--accelerator") {
       runConfig.accelerator = argv[++i];
     } else if (arg == "--version") {
@@ -345,16 +489,6 @@ void parseArgs(int argc, char *argv[], RunConfig &runConfig) {
     } else if (arg == "-h" || arg == "--help") {
       printUsage(argv);
       exit(0);
-    } else if (arg == "--ip") {
-      ensureArg(argc, argv, i);
-      runConfig.ip = argv[++i];
-    } else if (arg == "--port") {
-      ensureArg(argc, argv, i);
-      runConfig.port = (uint16_t)stoul(argv[++i]);
-    } else {
-      cerr << "Unknown argument: " << arg << endl;
-      printUsage(argv);
-      exit(1);
     }
   }
 

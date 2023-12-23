@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(streaming-piper LANGUAGES CXX)
+project(paroli LANGUAGES CXX)
 
 option(USE_RKNN "Enable RKNN for accelerated inference" OFF)
 
@@ -15,7 +15,7 @@ endif()
 include_directories(${ORT_ROOT}/include)
 link_directories(${ORT_ROOT}/lib)
 
-set(PIPER_PHONEMIZE_ROOT "" CACHE STRING "Path to eSpeak NG root directory")
+set(PIPER_PHONEMIZE_ROOT "" CACHE STRING "Path to piper-phonemize root directory")
 if (PIPER_PHONEMIZE_ROOT STREQUAL "")
     message(FATAL_ERROR "PIPER_PHONEMIZE_ROOT must be set")
 endif()
@@ -27,17 +27,16 @@ find_package(Drogon REQUIRED)
 find_package(fmt REQUIRED)
 find_package(Opus REQUIRED)
 
-add_library(pipercore
-    pipercore/piper.cpp)
+add_library(piper
+    piper/piper.cpp)
 
 if (USE_RKNN)
-    target_compile_definitions(pipercore PRIVATE USE_RKNN)
-    target_sources(pipercore PRIVATE pipercore/rknn-inferer.cpp)
+    target_compile_definitions(piper PRIVATE USE_RKNN)
+    target_sources(piper PRIVATE piper/rknn-inferer.cpp)
 endif()
+target_precompile_headers(piper PRIVATE piper/pch.hpp)
 
-target_precompile_headers(pipercore PRIVATE pipercore/pch.hpp)
-
-target_link_libraries(pipercore
+target_link_libraries(piper
     PRIVATE
     onnxruntime
     espeak-ng
@@ -47,19 +46,19 @@ target_link_libraries(pipercore
     dl
     rknnrt)
 
-target_include_directories(pipercore
+target_include_directories(piper
     PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/pipercore)
+    ${CMAKE_CURRENT_SOURCE_DIR}/piper)
 
-add_executable(piper-cli
-    piper-cli/main.cpp)
-target_link_libraries(piper-cli pipercore)
+add_executable(paroli-cli
+    paroli-cli/main.cpp)
+target_link_libraries(paroli-cli PRIVATE piper)
 
-add_executable(piper-server
-    piper-server/api.cpp
-    piper-server/OggOpusEncoder.cpp
-    piper-server/main.cpp)
-target_link_libraries(piper-server PRIVATE pipercore Drogon::Drogon soxr ${OPUS_LIBRARIES} opusenc ogg)
-target_include_directories(piper-server PRIVATE ${OPUS_INCLUDE_DIRS})
-target_precompile_headers(piper-server PRIVATE piper-server/pch.hpp)
+add_executable(paroli-server
+    paroli-server/api.cpp
+    paroli-server/OggOpusEncoder.cpp
+    paroli-server/main.cpp)
+target_link_libraries(paroli-server PRIVATE piper Drogon::Drogon soxr ${OPUS_LIBRARIES} opusenc ogg)
+target_include_directories(paroli-server PRIVATE ${OPUS_INCLUDE_DIRS})
+target_precompile_headers(paroli-server PRIVATE paroli-server/pch.hpp)
 

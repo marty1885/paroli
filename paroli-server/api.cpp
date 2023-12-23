@@ -41,7 +41,7 @@ auto speak(const std::string& text, std::optional<size_t> speaker_id, Func cb, s
 struct SynthesisApiParams
 {
     std::string text;
-    std::optional<size_t> speaker_id;
+    std::optional<int64_t> speaker_id;
     std::optional<float> length_scale;
     std::optional<float> noise_scale;
     std::optional<float> noise_w;
@@ -120,7 +120,7 @@ SynthesisApiParams parseSynthesisApiParams(const std::string_view json_txt)
         throw std::runtime_error("Missing 'text' field");
     res.text = json["text"].get<std::string>();
     if(json.contains("speaker_id") && json["speaker_id"].is_null() == false)
-        res.speaker_id = json["speaker_id"].get<size_t>();
+        res.speaker_id = json["speaker_id"].get<int64_t>();
     if(json.contains("speaker")) {
         const auto& speaker_id_map = voice.modelConfig.speakerIdMap;
         auto speaker = json["speaker"].get<std::string>();

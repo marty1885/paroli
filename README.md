@@ -1,6 +1,6 @@
-# piper-streamer
+# Paroli
 
-Streaming mode implementation of the Piper TTS system in C++ with (optional) RK3588 NPU acceleration support
+Streaming mode implementation of the Piper TTS system in C++ with (optional) RK3588 NPU acceleration support. Named after "speaking" in Esperanto.
 
 ## How to use
 
@@ -34,13 +34,13 @@ make -j
 ```
 
 **TODO:** Explain how to get the models
-Afterwards run `piper-cli` and type into the console to synthesize speech.
+Afterwards run `paroli-cli` and type into the console to synthesize speech.
 
 ```plaintext
-./piper-cli --encoder /path/to/your/encoder.onnx --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json
+./paroli-cli --encoder /path/to/your/encoder.onnx --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json
 ...
-[2023-12-23 03:13:12.452] [piper] [info] Wrote /home/marty/Documents/rkpiper/build/./1703301190238261389.wav
-[2023-12-23 03:13:12.452] [piper] [info] Real-time factor: 0.16085024956315996 (infer=2.201744556427002 sec, audio=13.688163757324219 sec)
+[2023-12-23 03:13:12.452] [paroli] [info] Wrote /home/marty/Documents/rkpiper/build/./1703301190238261389.wav
+[2023-12-23 03:13:12.452] [paroli] [info] Real-time factor: 0.16085024956315996 (infer=2.201744556427002 sec, audio=13.688163757324219 sec)
 ```
 
 ### The API server
@@ -50,7 +50,7 @@ An web API server is also provided so other applications can easily perform text
 To run it:
 
 ```bash
-./piper-server --encoder /path/to/your/encoder.onnx --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json --ip 0.0.0.0 --port 8848
+./paroli-server --encoder /path/to/your/encoder.onnx --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json --ip 0.0.0.0 --port 8848
 ```
 
 And to invoke TSS
@@ -99,7 +99,21 @@ python tools/decoder2rknn.py /path/to/model/decoder.onnx /path/to/model/decoder.
 To use RKNN for inference, simply pass the RKNN model in the CLI. An error will appear if RKNN is passed in but RKNN support not enabled during compiling.
 
 ```bash
-./piper-cli --encoder /path/to/your/encoder.rknn --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json
+./paroli-cli --encoder /path/to/your/encoder.rknn --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json
 #                                           ^^^^
 #                                      The only change
 ```
+
+## Developer notes
+
+TODO:
+
+- [ ] Code cleanup
+- [ ] Investigate ArmNN to acceelrate encoder inference
+* RKNN
+    - [ ] Add dynamic shape support when Rockchip fixes them
+    - [ ] Try using quantization see if the speedup is worth the lowered quality
+
+## Notes
+
+There's no good way to reduce synthesis latency on RK3588 besides Rockchip improving rknnrt and their compiler. The encoder is a dynamic graph thus RKNN won't work. And how they implement multi-NPU co-process prohibits faster single batch inference. Multi batch can be made faster but I don't see the value of it as it is already fast enough for home use.
