@@ -74,6 +74,10 @@ To obtain the encoder and decoder models, you'll either need to download them or
 python3 -m piper_train.export_onnx_streaming /path/to/your/traning/lighting_logs/version_0/checkpoints/blablablas.ckpt /path/to/output/directory
 ```
 
+### Downloading models
+
+Some 100% legal models are provided on [HuggingFace](https://huggingface.co/marty1885/streaming-piper/tree/main).
+
 ## Accelerators
 
 By default the models run on the CPU and could be power hungry and slow. If you'd like to use a GPU and, etc.. You can pass the `--accelerator cuda` flag in the CLI to enable it. For now the only supported accelerator is CUDA. But ROCm can be easily supported, just I don't have the hardware to test it. Feel free to contribute.
