@@ -690,12 +690,11 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
             auto next_chunk_start = real_start;
             next_chunk_start -= std::min(std::distance(chunk_audio.begin(), next_chunk_start), (ptrdiff_t)compare_window);
             size_t min_diff = std::numeric_limits<size_t>::max();
-            // increment by 4 to speed up the search
+            // increment by 2 to speed up the search
             for(size_t j=0;j<search_window*2;j+=2) {
               size_t diff = 0;
-              for(size_t k=0;k<compare_window;k++) {
+              for(size_t k=0;k<compare_window;k++)
                 diff += std::abs(prev_chunk_end[k] - next_chunk_start[j+k]);
-              }
               if(diff < min_diff) {
                 min_diff = diff;
                 real_start = next_chunk_start + j + compare_window;
@@ -704,9 +703,8 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
             // average the samples in the compare window to smooth out the transition even more
             auto prev_base_ptr = audioBuffer.end() - compare_window;
             auto next_base_ptr = real_start - compare_window;
-            for(size_t j=0;j<compare_window;j++) {
+            for(size_t j=0;j<compare_window;j++)
                 prev_base_ptr[j] = (prev_base_ptr[j] + next_base_ptr[j]) / 2;
-            }
           }
 
           auto real_end = chunk_audio.end() - end_pad * 256;

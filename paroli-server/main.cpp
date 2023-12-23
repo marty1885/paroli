@@ -98,7 +98,6 @@ void parseArgs(int argc, char *argv[], RunConfig &runConfig);
 
 int main(int argc, char *argv[]) {
   spdlog::set_default_logger(spdlog::stderr_color_st("paroli"));
-  spdlog::set_level(spdlog::level::debug);
 
   RunConfig runConfig;
   parseArgs(argc, argv, runConfig);
