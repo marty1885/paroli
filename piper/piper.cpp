@@ -502,7 +502,6 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
                  std::optional<float> lengthScale,
                  std::optional<float> noiseW) {
 
-  std::cout << (bool)audioCallback << std::endl;
   std::size_t sentenceSilenceSamples = 0;
   if (voice.synthesisConfig.sentenceSilenceSeconds > 0) {
     sentenceSilenceSamples = (std::size_t)(

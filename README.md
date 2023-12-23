@@ -68,6 +68,10 @@ Demo:
 
 To enable use cases where the service is exposed for whatever reason. The API server supports a basic authentication scheme. The `--auth` flag will generate a bearer token that is different every time and both websocket and HTTP synthesis API will only work if enabled. `--auth [YOUR_TOKEN]` will set the token to YOUR_TOKEN. Furthermore setting the `PAROLI_TOKEN` enviroment variable will set the bearer token to whatever the enviroment variable is set to.
 
+```plaintext
+Authentication: Bearer <insert the token>
+```
+
 **The Web UI will not work when authenticatoin is enabled**
 
 ## Obtaining models
