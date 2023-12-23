@@ -80,9 +80,11 @@ RknnDecoderInfererImpl::RknnDecoderInfererImpl(rknn_context ctx)
     }
 }
 
-std::vector<int16_t> RknnDecoderInfererImpl::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g)
+std::vector<int16_t> RknnDecoderInfererImpl::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const std::optional<xt::xarray<float>>& g)
 {
-    std::vector<const xt::xarray<float>*> sources = {&z, &y_mask, &g};
+    std::vector<const xt::xarray<float>*> sources = {&z, &y_mask};
+    if (g)
+        sources.push_back(&(*g));
     std::vector<xt::xarray<float>> reshaped_sources;
     const auto sz = z.shape()[2];
     if(sz > 55)
@@ -189,7 +191,7 @@ void RknnDecoderInferer::load(std::string modelPath, std::string accelerator)
     implTracker = {0, 0, 0};
 }
 
-std::vector<int16_t> RknnDecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g)
+std::vector<int16_t> RknnDecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const std::optional<xt::xarray<float>>& g)
 {
     int idx = 0;
     do {

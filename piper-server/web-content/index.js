@@ -10,10 +10,18 @@ var player;
 
 window.onload = function () {
     let speaker_list = document.getElementById('speaker_select')
+    let speaker_select_label = document.getElementById('speaker_select_label')
     fetch('/api/v1/speakers').then(function (response) {
         return response.json();
     }).then(function (data) {
         let default_speaker = null
+        // if no speaker is available (i.e. single speaker model), disable the select
+        if(Object.keys(data).length == 0) {
+            speaker_list.disabled = true
+            speaker_select_label.innerHTML = 'Speaker (disabled for single speaker models):'
+            speaker_select_label.classList.add('greyout-text')
+            return
+        }
         for(let key in data) {
             let option = document.createElement('option')
             option.value = data[key]

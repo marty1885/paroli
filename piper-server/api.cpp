@@ -92,8 +92,8 @@ SynthesisApiParams parseSynthesisApiParams(const std::string_view json_txt)
     if(!json.contains("text"))
         throw std::runtime_error("Missing 'text' field");
     res.text = json["text"].get<std::string>();
-    if(json.contains("speaker_id"))
-        res.speaker_id = json["speaker_id"].get<int>();
+    if(json.contains("speaker_id") && json["speaker_id"].is_null() == false)
+        res.speaker_id = json["speaker_id"].get<size_t>();
     if(json.contains("speaker")) {
         const auto& speaker_id_map = voice.modelConfig.speakerIdMap;
         auto speaker = json["speaker"].get<std::string>();
@@ -259,7 +259,7 @@ Task<HttpResponsePtr> v1::speakers(const HttpRequestPtr req)
 
     const auto& speakerIdMap = voice.modelConfig.speakerIdMap;
     if(speakerIdMap.has_value() == false) {
-        resp->setBody("[]");
+        resp->setBody("{}");
     }
     else {
         resp->setBody(nlohmann::json(speakerIdMap.value()).dump());

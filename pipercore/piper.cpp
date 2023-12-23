@@ -322,13 +322,12 @@ void OnnxDecoderInferer::load(std::string path, std::string accelerator)
     onnx = Ort::Session(env, path.c_str(), options);
 }
 
-std::vector<int16_t> OnnxDecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g)
+std::vector<int16_t> OnnxDecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const std::optional<xt::xarray<float>>& g)
 {
   auto memoryInfo = Ort::MemoryInfo::CreateCpu(
       OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
 
   std::vector<Ort::Value> inputTensors;
-  // HACK: Fix this later
   const std::array<std::string, 3> paramNames = {"z", "y_mask", "g"};
   for(auto& name : paramNames) {
     const xt::xarray<float>* ptr = nullptr;
@@ -336,8 +335,11 @@ std::vector<int16_t> OnnxDecoderInferer::infer(const xt::xarray<float>& z, const
       ptr = &z;
     else if(name == "y_mask")
       ptr = &y_mask;
-    else if(name == "g")
-      ptr = &g;
+    else if(name == "g") {
+        if(!g.has_value())
+            continue;
+        ptr = &g.value();
+    }
     else
       throw std::runtime_error("Invalid parameter name");
     auto& arr = *ptr;
@@ -347,7 +349,9 @@ std::vector<int16_t> OnnxDecoderInferer::infer(const xt::xarray<float>& z, const
         shape.size()));
   }
 
-  std::array<const char *, 3> inputNames = {"z", "y_mask", "g"};
+  std::vector<const char*> inputNames = {"z", "y_mask"};
+  if(g.has_value())
+    inputNames.push_back("g");
   std::array<const char *, 1> outputNames = {"output"};
 
   auto startTime = std::chrono::steady_clock::now();
@@ -439,14 +443,20 @@ std::map<std::string, xt::xarray<float>> EncoderInferer::infer(const std::vector
   // From export_onnx.py
   std::array<const char *, 4> inputNames = {"input", "input_lengths", "scales",
                                             "sid"};
+
+  std::vector<std::string> outputNames;
+  for (size_t i=0;i<onnx.GetOutputCount();i++)
+    outputNames.push_back(onnx.GetOutputNameAllocated(i, allocator).get());
   // TODO: Just use all outputs
-  std::array<const char *, 3> outputNames = {"z", "y_mask", "g"};
+  std::vector<const char*> outputNamePtrs;
+  for(size_t i=0;i<outputNames.size();i++)
+    outputNamePtrs.push_back(outputNames[i].c_str());
 
   // Infer
   auto startTime = std::chrono::steady_clock::now();
   auto outputTensors = onnx.Run(
       Ort::RunOptions{nullptr}, inputNames.data(), inputTensors.data(),
-      inputTensors.size(), outputNames.data(), outputNames.size());
+      inputTensors.size(), outputNamePtrs.data(), outputNamePtrs.size());
   auto endTime = std::chrono::steady_clock::now();
 
   if(outputTensors.size() != outputNames.size())
@@ -621,7 +631,9 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
                           noiseW.value_or(voice.synthesisConfig.noiseW));
       auto encode_end = std::chrono::steady_clock::now();
       float encode_seconds = std::chrono::duration<double>(encode_end - encode_start).count();
-      auto& g = params["g"]; // g could be missing. TODO: Fix this
+      std::optional<xt::xarray<float>> g;
+      if(params.count("g"))
+        g = std::move(params["g"]);
       auto& y_mask = params["y_mask"];
       auto& z = params["z"];
 

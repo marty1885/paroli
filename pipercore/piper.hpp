@@ -102,7 +102,7 @@ struct OnnxDecoderInferer : DecoderInferer {
   Ort::SessionOptions options;
   Ort::Env env;
 
-  std::vector<int16_t> infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const xt::xarray<float>& g) override;
+  std::vector<int16_t> infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const std::optional<xt::xarray<float>>& g) override;
   void load(std::string modelPath, std::string accelerator) override;
 
   OnnxDecoderInferer() : onnx(nullptr){};

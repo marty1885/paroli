@@ -34,6 +34,9 @@
         label {
             font-size: 1.1em;
         }
+        .greyout-text {
+            opacity: 0.5;
+        }
     </style>
 </head>
 
@@ -43,7 +46,7 @@
     <p>Enter text to be spoken and click the button to hear it.</p>
     <textarea id="txt_input" style="width: 100%; height: 11em; resize: vertical">C++ is a high-level, general-purpose programming language created by Danish computer scientist Bjarne Stroustrup. </textarea>
     <div style="display: flex; flex-direction: row; justify-content: space-between; margin-bottom: 0.5em; margin-top: 1em">
-        <label for="speaker_select">Speaker (if model supports):</label>
+        <label id="speaker_select_label" for="speaker_select">Speaker:</label>
         <select id="speaker_select">
             <!-- Will be populated by JS -->
         </select>
