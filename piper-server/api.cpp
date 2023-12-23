@@ -47,6 +47,24 @@ struct SynthesisApiParams
     std::optional<float> noise_w;
 };
 
+static std::string replaceAll(std::string_view str, std::string_view from, std::string_view to)
+{
+    std::string result;
+    result.reserve(str.size());
+    size_t last = 0;
+    while(true) {
+        auto next = str.find(from, last);
+        if(next == std::string_view::npos) {
+            result += str.substr(last);
+            break;
+        }
+        result += str.substr(last, next - last);
+        result += to;
+        last = next + from.size();
+    }
+    return result;
+}
+
 static std::string piperTextPreprocess(std::string text)
 {
     // trim leading and tailing spaces
@@ -82,6 +100,15 @@ static std::string piperTextPreprocess(std::string text)
         }
         i++;
     }
+
+    // Handle stupid unicode characters that piper can't handle
+    result = replaceAll(result, "…", ",");
+    result = replaceAll(result, "“", "\"");
+    result = replaceAll(result, "”", "\"");
+    result = replaceAll(result, "‘", "'");
+    result = replaceAll(result, "’", "'");
+    result = replaceAll(result, "—", ", ");
+    result = replaceAll(result, " - ", ", ");
     return result;
 }
 

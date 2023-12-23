@@ -14,7 +14,9 @@
 #include "utf8.h"
 #include "wavfile.hpp"
 
+#ifdef USE_RKNN
 #include "rknn-inferer.hpp"
+#endif
 
 #include <xtensor/xarray.hpp>
 #include <xtensor/xadapt.hpp>
@@ -293,14 +295,17 @@ void loadVoice(PiperConfig &config, std::string modelPath,
 
   voice.encoder.load(encoderPath, accelerator);
 
-  // TODO: Parse wtih std::filesystem
   auto extension = std::filesystem::path(decoderPath).extension();
-  if(extension == ".rknn")
+  if(extension == ".rknn") {
+#ifdef USE_RKNN
       voice.decoder = std::make_unique<RknnDecoderInferer>();
+#else
+      throw std::runtime_error("RKNN is not enabled in this build");
+#endif
+  }
   else
       voice.decoder = std::make_unique<OnnxDecoderInferer>();
   voice.decoder->load(decoderPath, accelerator);
-
 } /* loadVoice */
 
 void OnnxDecoderInferer::load(std::string path, std::string accelerator)

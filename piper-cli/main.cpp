@@ -282,7 +282,7 @@ int main(int argc, char *argv[]) {
       // Output audio to automatically-named WAV file in a directory
       ofstream audioFile(outputPath.string(), ios::binary);
       piper::textToWavFile(piperConfig, voice, line, audioFile, result);
-      cout << outputPath.string() << endl;
+      spdlog::info("Wrote {}", outputPath.string());
     } else if (outputType == OUTPUT_FILE) {
       if (!maybeOutputPath || maybeOutputPath->empty()) {
         throw runtime_error("No output path provided");
