@@ -39,7 +39,11 @@ window.onload = function () {
 function runTTS() {
     let str = document.getElementById('txt_input').value
     let speaker = document.getElementById('speaker_select').value
-    let data = JSON.stringify({text: str, speaker_id: parseInt(speaker)})
+    let data = JSON.stringify({
+        text: str,
+        speaker_id: parseInt(speaker),
+        audio_format: 'pcm'
+    })
     if (ws == null || ws.readyState != 1) {
         player = new PCMPlayer(pcmplayer_opt);
         reconnectWS(function () {

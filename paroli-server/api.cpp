@@ -46,6 +46,7 @@ struct SynthesisApiParams
     std::optional<float> length_scale;
     std::optional<float> noise_scale;
     std::optional<float> noise_w;
+    std::optional<std::string> audio_format;
 };
 
 static std::string replaceAll(std::string_view str, std::string_view from, std::string_view to)
@@ -147,6 +148,11 @@ SynthesisApiParams parseSynthesisApiParams(const std::string_view json_txt)
             throw std::runtime_error("noise_w must be a number");
         res.noise_w = json["noise_w"].get<float>();
     }
+    if(json.contains("audio_format")) {
+        if(json["audio_format"].is_string() == false)
+            throw std::runtime_error("audio_format must be a string");
+        res.audio_format = json["audio_format"].get<std::string>();
+    }
 
     if(res.speaker_id.has_value() && *res.speaker_id > voice.modelConfig.numSpeakers)
         throw std::runtime_error("Speaker ID is out of range");
@@ -233,19 +239,30 @@ void v1ws::handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string
         wsConnPtr->send("ERROR: " + std::string(e.what()));
         return;
     }
+    bool send_opus = params.audio_format.value_or("opus") == "opus";
 
-    bool ok = speak(params.text, params.speaker_id, [&wsConnPtr](const std::span<const short> view) {
+    StreamingOggOpusEncoder encoder(24000, 1);
+    bool ok = speak(params.text, params.speaker_id, [&](const std::span<const short> view) {
         if(view.empty())
             return;
         auto pcm = resample(view, voice.synthesisConfig.sampleRate, 24000, 1);
-        //auto opus = encodeOgg(pcm, 24000, 1);
-
+        if(send_opus) {
+            auto opus = encoder.encode(pcm);
+            wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
+            return;
+        }
         // TODO: Fix Big Endian support
         wsConnPtr->send((char*)pcm.data(), pcm.size() * sizeof(int16_t), WebSocketMessageType::Binary);
     }, params.length_scale, params.noise_scale, params.noise_w);
+
     if(!ok) {
         wsConnPtr->send("ERROR: Failed to synthesise");
         return;
+    }
+    if(send_opus) {
+        auto opus = encoder.finish();
+        if(opus.empty() == false)
+            wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
     }
 }
 
@@ -286,13 +303,18 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
     if(!ok)
         co_return makeBadRequestResponse("Failed to synthesise text");
 
-    auto pcm = resample(audio, voice.synthesisConfig.sampleRate, 24000, 1);
-    auto opus = encodeOgg(pcm, 24000, 1);
-
     auto resp = HttpResponse::newHttpResponse();
+    if(params.audio_format.value_or("opus") == "opus") {
+        auto pcm = resample(audio, voice.synthesisConfig.sampleRate, 24000, 1);
+        auto opus = encodeOgg(pcm, 24000, 1);
+        resp->setContentTypeString("audio/ogg; codecs=opus");
+        resp->setBody(std::string(reinterpret_cast<const char*>(opus.data()), opus.size()));
+        co_return resp;
+    }
+
     resp->setStatusCode(k200OK);
-    resp->setContentTypeString("audio/ogg; codecs=opus");
-    resp->setBody(std::string(reinterpret_cast<const char*>(opus.data()), opus.size()));
+    resp->setContentTypeString("audio/raw");
+    resp->setBody(std::string(reinterpret_cast<const char*>(audio.data()), audio.size() * sizeof(int16_t)));
     co_return resp;
 }
 
