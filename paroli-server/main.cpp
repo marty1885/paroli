@@ -81,10 +81,17 @@ struct RunConfig {
 
   // Port for the server to bind to
   uint16_t port = 8848;
+
+  // Authentication token
+  std::string authToken = "";
+
+  // Disable web UI
+  bool disableWebUI = false;
 };
 
 piper::PiperConfig piperConfig;
 piper::Voice voice;
+std::string authToken;
 
 void parseArgs(int argc, char *argv[], RunConfig &runConfig);
 // ----------------------------------------------------------------------------
@@ -214,9 +221,21 @@ int main(int argc, char *argv[]) {
 
   } // if phonemeSilenceSeconds
 
+  char* authTokenEnv = getenv("PAROLI_TOKEN");
+  if(authTokenEnv) {
+      authToken = authTokenEnv;
+      spdlog::info("Using authentication token from environment variable PAROLI_TOKEN");
+  }
+  else if(!runConfig.authToken.empty()) {
+      spdlog::info("Authentication token: {}", runConfig.authToken);
+      authToken = runConfig.authToken;
+  }
+
+  if(!runConfig.disableWebUI)
+      app().setDocumentRoot("../paroli-server/web-content");
+
   app().addListener(runConfig.ip, runConfig.port)
       .setThreadNum(3)
-      .setDocumentRoot("../paroli-server/web-content")
       .run();
 
   piper::terminate(piperConfig);
@@ -236,6 +255,9 @@ void printUsage(char *argv[]) {
   cerr << "   --decoder FILE  path to decoder model file" << endl;
   cerr << "   --ip      STR   ip address to bind to (default: 127.0.0.1" << endl;
   cerr << "   --port    NUM   port to bind to (default: 8848)" << endl;
+  cerr << "   --auth    [STR] authentication token (default: disabled)" << endl;
+  cerr << "                   if not provided, a random token will be generated" << endl;
+  cerr << "   --disable-web-ui              disable web UI" << endl;
   cerr << "   -c  FILE  --config      FILE  path to model config file "
           "(default: model path + .json)"
        << endl;
@@ -351,6 +373,13 @@ void parseArgs(int argc, char *argv[], RunConfig &runConfig) {
     } else if (arg == "--port") {
       ensureArg(argc, argv, i);
       runConfig.port = (uint16_t)stoul(argv[++i]);
+    } else if (arg == "--auth") {
+        if(i + 1 >= argc || argv[i + 1][0] == '-')
+            runConfig.authToken = drogon::utils::secureRandomString(32);
+        else
+            runConfig.authToken = argv[++i];
+    } else if (arg == "--disable-web-ui") {
+        runConfig.disableWebUI = true;
     } else {
       cerr << "Unknown argument: " << arg << endl;
       printUsage(argv);

@@ -13,6 +13,7 @@
 using namespace drogon;
 extern piper::PiperConfig piperConfig;
 extern piper::Voice voice;
+extern std::string authToken;
 
 template<typename Func>
 requires std::is_invocable_v<Func, const std::span<const short>>
@@ -200,13 +201,24 @@ struct v1 : public HttpController<v1>
 
 struct v1ws : public WebSocketController<v1ws>
 {
-   void handleNewConnection(const HttpRequestPtr& req, const WebSocketConnectionPtr& wsConnPtr) override {}
+   void handleNewConnection(const HttpRequestPtr& req, const WebSocketConnectionPtr& wsConnPtr) override;
    void handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string&& message, const WebSocketMessageType& type) override;
    void handleConnectionClosed(const WebSocketConnectionPtr& wsConnPtr) override {}
    WS_PATH_LIST_BEGIN
    WS_PATH_ADD("/api/v1/stream", Get);
    WS_PATH_LIST_END
 };
+
+void v1ws::handleNewConnection(const HttpRequestPtr& req, const WebSocketConnectionPtr& wsConnPtr)
+{
+    if(authToken.empty())
+        return;
+    auto auth = req->getHeader("Authorization");
+    if(auth.empty() || auth != "Bearer " + authToken) {
+        wsConnPtr->forceClose();
+        return;
+    }
+}
 
 void v1ws::handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string&& message, const WebSocketMessageType& type)
 {
@@ -248,6 +260,13 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
 
     if (req->getContentType() != CT_APPLICATION_JSON)
         co_return makeBadRequestResponse("Content-Type must be application/json");
+
+    if(authToken.empty() == false) {
+        auto auth = req->getHeader("Authorization");
+        if(auth.empty() || auth != "Bearer " + authToken)
+            co_return makeBadRequestResponse("Invalid Authorization");
+    }
+
 
     SynthesisApiParams params;
     try {

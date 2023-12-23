@@ -31,10 +31,11 @@ mkdir build
 cd build
 cmake .. -DORT_ROOT=/path/to/your/onnxruntime-linux-aarch64-1.14.1 -DPIPER_PHONEMIZE_ROOT=/path/to/your/piper-phonemize-2023-11-14 -DCMAKE_BUILD_TYPE=Release
 make -j
+# IMPORTANT! Copy espeak-ng-data else you need to point it manually
+cp -r /path/to/your/piper-phonemize-2023-11-14/share/espeak-ng-data .
 ```
 
-**TODO:** Explain how to get the models
-Afterwards run `paroli-cli` and type into the console to synthesize speech.
+Afterwards run `paroli-cli` and type into the console to synthesize speech. Please refer to later sections for generating the models.
 
 ```plaintext
 ./paroli-cli --encoder /path/to/your/encoder.onnx --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json
@@ -58,6 +59,12 @@ And to invoke TSS
 ```bash
 curl http://your.server.address:8848/api/v1/synthesise -X POST -H 'Content-Type: application/json' -d '{"text": "To be or not to be, that is the question"}' > test.opus
 ```
+
+#### Authentication
+
+To enable use cases where the service is exposed for whatever reason. The API server supports a basic authentication scheme. The `--auth` flag will generate a bearer token that is different every time and both websocket and HTTP synthesis API will only work if enabled. `--auth [YOUR_TOKEN]` will set the token to YOUR_TOKEN. Furthermore setting the `PAROLI_TOKEN` enviroment variable will set the bearer token to whatever the enviroment variable is set to.
+
+**The Web UI will not work when authenticatoin is enabled**
 
 ## Obtaining models
 
@@ -110,6 +117,7 @@ TODO:
 
 - [ ] Code cleanup
 - [ ] Investigate ArmNN to acceelrate encoder inference
+- [ ] Better handling for authentication
 * RKNN
     - [ ] Add dynamic shape support when Rockchip fixes them
     - [ ] Try using quantization see if the speedup is worth the lowered quality
