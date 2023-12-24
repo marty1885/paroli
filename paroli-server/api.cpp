@@ -238,9 +238,8 @@ void v1ws::handleNewConnection(const HttpRequestPtr& req, const WebSocketConnect
 void v1ws::handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string&& message, const WebSocketMessageType& type)
 {
     // yeah yeah this can be raced even with atomic. I don't care not be deal
-    int index = synthesizerThreadIndex++;
-    if(index >= synthesizerThreadPool.size())
-        index = 0;
+    int index = synthesizerThreadIndex++ % synthesizerThreadPool.size();
+    index = index % synthesizerThreadPool.size();
     synthesizerThreadPool.getLoop(index)->queueInLoop(async_func([=, this]() mutable -> Task<> {
         co_await handleNewMessageAsync(wsConnPtr, std::move(message), type);
     }));
@@ -307,7 +306,7 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
     int id = synthesizerThreadIndex++;
     if(synthesizerThreadIndex >= synthesizerThreadPool.size())
         synthesizerThreadIndex = 0;
-    auto loop = synthesizerThreadPool.getLoop(id);
+    auto loop = synthesizerThreadPool.getLoop(id % synthesizerThreadPool.size());
     co_await switchThreadCoro(loop);
 
 
