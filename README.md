@@ -46,7 +46,7 @@ Afterwards run `paroli-cli` and type into the console to synthesize speech. Plea
 
 ### The API server
 
-An web API server is also provided so other applications can easily perform text to speech. For details, please refer to the [web API document](docs/web_api.md) for details. By default, a demo UI can be accessed at the root of the URL. The API server supports both responding with compressed audio to reduce bandwidth requirment and streaming audio via WebSocket. 
+An web API server is also provided so other applications can easily perform text to speech. For details, please refer to the [web API document](paroli_server/docs/web_api.md) for details. By default, a demo UI can be accessed at the root of the URL. The API server supports both responding with compressed audio to reduce bandwidth requirment and streaming audio via WebSocket. 
 
 To run it:
 
