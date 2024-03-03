@@ -10,6 +10,16 @@
 #include <nlohmann/json.hpp>
 #include <soxr.h>
 
+#if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || \
+    defined(__BIG_ENDIAN__) || \
+    defined(__ARMEB__) || \
+    defined(__THUMBEB__) || \
+    defined(__AARCH64EB__) || \
+    defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__)
+#define BIG_ENDIAN
+#endif
+
+
 using namespace drogon;
 extern piper::PiperConfig piperConfig;
 extern piper::Voice voice;
@@ -254,7 +264,10 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
         params = parseSynthesisApiParams(message);
     }
     catch (const std::exception& e) {
-        wsConnPtr->send("ERROR: " + std::string(e.what()));
+        nlohmann::json resp;
+        resp["status"] = "failed";
+        resp["message"] = std::string(e.what());
+        wsConnPtr->send(resp.dump());
         co_return;
     }
     bool send_opus = params.audio_format.value_or("opus") == "opus";
@@ -269,12 +282,17 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
             wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
             return;
         }
-        // TODO: Fix Big Endian support
+
+#ifdef BIG_ENDIAN
+        // Convert to little endian
+        for(int16_t& sample : pcm)
+            sample = (num >> 8) | (num << 8);
+#endif
         wsConnPtr->send((char*)pcm.data(), pcm.size() * sizeof(int16_t), WebSocketMessageType::Binary);
     }, params.length_scale, params.noise_scale, params.noise_w);
 
     if(!ok) {
-        wsConnPtr->send("ERROR: Failed to synthesise");
+        wsConnPtr->send(R"({"status":"failed", "message":"failed to synthesis"})");
         co_return;
 
     }
@@ -283,6 +301,7 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
         if(opus.empty() == false)
             wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
     }
+    wsConnPtr->send(R"({"status":"ok", "message":"finished"})");
 }
 
 Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)

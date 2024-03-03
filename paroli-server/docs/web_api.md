@@ -84,7 +84,7 @@ example response:
 * Method: GET
 * Parameters: None
 
-This endpoint works exactly like the synthesise API above. But audio is streamed in chunk as soon as it can - reducing latency. Message format is the same as the synthesise API body.
+This endpoint works exactly like the synthesise API above. But audio is streamed in chunk as soon as it can - reducing latency, as binary blobs. Message format is the same as the synthesise API body. A text message is sent once an error is encountered or synthesis of current text is finished.
 
 For example, the following message causes OPUS audio to be streamed back as binray messages.
 
@@ -92,6 +92,8 @@ For example, the following message causes OPUS audio to be streamed back as binr
 wscat -c 'ws://example.com:8848/api/v1/stream' 
 > {"text": "Hello! how can I help you"}
 < [OPUS audio blob]
+< [OPUS audio blob]
+< {"status":"ok", "message":"finished"}
 ```
 
 The server will reply error as text
@@ -99,5 +101,5 @@ The server will reply error as text
 ```bash
 wscat -c 'ws://example.com:8848/api/v1/stream' 
 > {"hello": "blablabla"}
-< ERROR: Missing 'text' field
+< {"status":"failed", "message":"Missing 'text' field"}
 ```
