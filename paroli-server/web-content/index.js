@@ -64,6 +64,13 @@ function reconnectWS(connect_fn) {
           connect_fn && connect_fn()
      });
      ws.addEventListener('message', function (event) {
+
+          if(typeof event.data == 'string') {
+              let msg = JSON.parse(event.data);
+              if(msg["status"] == "ok")
+                  return;
+              console.error(msg);
+          }
           var data = new Uint8Array(event.data);
           if(data.length == 0) return; // ignore empty (pong) messages
           player.feed(data);

@@ -4,6 +4,7 @@
 #include <trantor/net/EventLoopThreadPool.h>
 
 #include <span>
+#include <bit>
 
 #include "piper.hpp"
 #include "OggOpusEncoder.hpp"
@@ -15,7 +16,6 @@ extern piper::PiperConfig piperConfig;
 extern piper::Voice voice;
 extern std::string authToken;
 trantor::EventLoopThreadPool synthesizerThreadPool(3, "synehesizer thread pool");
-std::atomic<size_t> synthesizerThreadIndex = 0;
 
 template<typename Func>
 requires std::is_invocable_v<Func, const std::span<const short>>
@@ -163,7 +163,7 @@ SynthesisApiParams parseSynthesisApiParams(const std::string_view json_txt)
     return res;
 }
 
-std::vector<short> resample(std::span<const short> input, size_t orig_sr, size_t out_sr, int channels)
+static std::vector<short> resample(std::span<const short> input, size_t orig_sr, size_t out_sr, int channels)
 {
     soxr_io_spec_t io_spec = soxr_io_spec(SOXR_INT16_I, SOXR_INT16_I);
     soxr_quality_spec_t q_spec = soxr_quality_spec(SOXR_MQ, 0);
@@ -237,10 +237,7 @@ void v1ws::handleNewConnection(const HttpRequestPtr& req, const WebSocketConnect
 
 void v1ws::handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string&& message, const WebSocketMessageType& type)
 {
-    // yeah yeah this can be raced even with atomic. I don't care not be deal
-    int index = synthesizerThreadIndex++ % synthesizerThreadPool.size();
-    index = index % synthesizerThreadPool.size();
-    synthesizerThreadPool.getLoop(index)->queueInLoop(async_func([=, this]() mutable -> Task<> {
+    synthesizerThreadPool.getNextLoop()->queueInLoop(async_func([=, this]() mutable -> Task<> {
         co_await handleNewMessageAsync(wsConnPtr, std::move(message), type);
     }));
 }
@@ -254,7 +251,10 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
         params = parseSynthesisApiParams(message);
     }
     catch (const std::exception& e) {
-        wsConnPtr->send("ERROR: " + std::string(e.what()));
+        nlohmann::json resp;
+        resp["status"] = "failed";
+        resp["message"] = std::string(e.what());
+        wsConnPtr->send(resp.dump());
         co_return;
     }
     bool send_opus = params.audio_format.value_or("opus") == "opus";
@@ -269,12 +269,17 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
             wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
             return;
         }
-        // TODO: Fix Big Endian support
+
+        if constexpr (std::endian::native == std::endian::big) {
+            // Convert to little endian
+            for(int16_t& sample : pcm)
+                sample = (sample >> 8) | (sample << 8);
+        }
         wsConnPtr->send((char*)pcm.data(), pcm.size() * sizeof(int16_t), WebSocketMessageType::Binary);
     }, params.length_scale, params.noise_scale, params.noise_w);
 
     if(!ok) {
-        wsConnPtr->send("ERROR: Failed to synthesise");
+        wsConnPtr->send(R"({"status":"failed", "message":"failed to synthesis"})");
         co_return;
 
     }
@@ -283,6 +288,7 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
         if(opus.empty() == false)
             wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
     }
+    wsConnPtr->send(R"({"status":"ok", "message":"finished"})");
 }
 
 Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
@@ -303,10 +309,7 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
             co_return makeBadRequestResponse("Invalid Authorization");
     }
 
-    int id = synthesizerThreadIndex++;
-    if(synthesizerThreadIndex >= synthesizerThreadPool.size())
-        synthesizerThreadIndex = 0;
-    auto loop = synthesizerThreadPool.getLoop(id % synthesizerThreadPool.size());
+    auto loop = synthesizerThreadPool.getNextLoop();
     co_await switchThreadCoro(loop);
 
 
