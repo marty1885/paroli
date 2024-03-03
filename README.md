@@ -10,8 +10,8 @@ Before building, you will need to fulfill the following dependencies
 * spdlog
 * libfmt
 * piper-phoenomize
-* onnxruntime == 1.14
-* A C++20 capiable compiler
+* onnxruntime (1.14 or 1.15)
+* A C++20 capable compiler
 
 (API/Web server)
 * Drogon
@@ -19,10 +19,10 @@ Before building, you will need to fulfill the following dependencies
 * libogg
 * libopus
 * libopusenc
-    * You'll need to build this from source if on Ubuntu 22.04. Package avaliable starting on 23.04
+    * You'll need to build this from source if on Ubuntu 22.04. Package available starting on 23.04
 
 (RKNN support)
-* rknnrt >= 1.6.0
+* [rknnrt >= 1.6.0](https://github.com/rockchip-linux/rknn-toolkit2/tree/v1.6.0/rknpu2/runtime/Linux/librknn_api)
 
 In which `piper-phoenomize` and `onnxruntime` binary (not the source! Unless you want to build yourselves!) likely needs to be downloaded and decompressed manually. Afterwards run CMake and point to the folders you recompressed them.
 
@@ -31,7 +31,7 @@ mkdir build
 cd build
 cmake .. -DORT_ROOT=/path/to/your/onnxruntime-linux-aarch64-1.14.1 -DPIPER_PHONEMIZE_ROOT=/path/to/your/piper-phonemize-2023-11-14 -DCMAKE_BUILD_TYPE=Release
 make -j
-# IMPORTANT! Copy espeak-ng-data else you need to point it manually
+# IMPORTANT! Copy espeak-ng-data or pass `--espeak_data` CLI flag
 cp -r /path/to/your/piper-phonemize-2023-11-14/share/espeak-ng-data .
 ```
 
@@ -46,7 +46,7 @@ Afterwards run `paroli-cli` and type into the console to synthesize speech. Plea
 
 ### The API server
 
-An web API server is also provided so other applications can easily perform text to speech. For details, please refer to the [web API document](paroli-server/docs/web_api.md) for details. By default, a demo UI can be accessed at the root of the URL. The API server supports both responding with compressed audio to reduce bandwidth requirment and streaming audio via WebSocket. 
+An web API server is also provided so other applications can easily perform text to speech. For details, please refer to the [web API document](paroli-server/docs/web_api.md) for details. By default, a demo UI can be accessed at the root of the URL. The API server supports both responding with compressed audio to reduce bandwidth requirement and streaming audio via WebSocket. 
 
 To run it:
 
@@ -66,13 +66,13 @@ Demo:
 
 #### Authentication
 
-To enable use cases where the service is exposed for whatever reason. The API server supports a basic authentication scheme. The `--auth` flag will generate a bearer token that is different every time and both websocket and HTTP synthesis API will only work if enabled. `--auth [YOUR_TOKEN]` will set the token to YOUR_TOKEN. Furthermore setting the `PAROLI_TOKEN` enviroment variable will set the bearer token to whatever the enviroment variable is set to.
+To enable use cases where the service is exposed for whatever reason. The API server supports a basic authentication scheme. The `--auth` flag will generate a bearer token that is different every time and both websocket and HTTP synthesis API will only work if enabled. `--auth [YOUR_TOKEN]` will set the token to YOUR_TOKEN. Furthermore setting the `PAROLI_TOKEN` environment variable will set the bearer token to whatever the environment variable is set to.
 
 ```plaintext
 Authentication: Bearer <insert the token>
 ```
 
-**The Web UI will not work when authenticatoin is enabled**
+**The Web UI will not work when authentication is enabled**
 
 ## Obtaining models
 
@@ -128,7 +128,7 @@ To use RKNN for inference, simply pass the RKNN model in the CLI. An error will 
 TODO:
 
 - [ ] Code cleanup
-- [ ] Investigate ArmNN to acceelrate encoder inference
+- [ ] Investigate ArmNN to accelerate encoder inference
 - [ ] Better handling for authentication
 * RKNN
     - [ ] Add dynamic shape support when Rockchip fixes them
