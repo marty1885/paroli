@@ -4,21 +4,12 @@
 #include <trantor/net/EventLoopThreadPool.h>
 
 #include <span>
+#include <bit>
 
 #include "piper.hpp"
 #include "OggOpusEncoder.hpp"
 #include <nlohmann/json.hpp>
 #include <soxr.h>
-
-#if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || \
-    defined(__BIG_ENDIAN__) || \
-    defined(__ARMEB__) || \
-    defined(__THUMBEB__) || \
-    defined(__AARCH64EB__) || \
-    defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__)
-#define BIG_ENDIAN
-#endif
-
 
 using namespace drogon;
 extern piper::PiperConfig piperConfig;
@@ -172,7 +163,7 @@ SynthesisApiParams parseSynthesisApiParams(const std::string_view json_txt)
     return res;
 }
 
-std::vector<short> resample(std::span<const short> input, size_t orig_sr, size_t out_sr, int channels)
+static std::vector<short> resample(std::span<const short> input, size_t orig_sr, size_t out_sr, int channels)
 {
     soxr_io_spec_t io_spec = soxr_io_spec(SOXR_INT16_I, SOXR_INT16_I);
     soxr_quality_spec_t q_spec = soxr_quality_spec(SOXR_MQ, 0);
@@ -279,11 +270,11 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
             return;
         }
 
-#ifdef BIG_ENDIAN
-        // Convert to little endian
-        for(int16_t& sample : pcm)
-            sample = (sample >> 8) | (sample << 8);
-#endif
+        if constexpr (std::endian::native == std::endian::big) {
+            // Convert to little endian
+            for(int16_t& sample : pcm)
+                sample = (sample >> 8) | (sample << 8);
+        }
         wsConnPtr->send((char*)pcm.data(), pcm.size() * sizeof(int16_t), WebSocketMessageType::Binary);
     }, params.length_scale, params.noise_scale, params.noise_w);
 
