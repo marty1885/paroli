@@ -25,7 +25,6 @@ extern piper::PiperConfig piperConfig;
 extern piper::Voice voice;
 extern std::string authToken;
 trantor::EventLoopThreadPool synthesizerThreadPool(3, "synehesizer thread pool");
-std::atomic<size_t> synthesizerThreadIndex = 0;
 
 template<typename Func>
 requires std::is_invocable_v<Func, const std::span<const short>>
@@ -247,10 +246,7 @@ void v1ws::handleNewConnection(const HttpRequestPtr& req, const WebSocketConnect
 
 void v1ws::handleNewMessage(const WebSocketConnectionPtr& wsConnPtr, std::string&& message, const WebSocketMessageType& type)
 {
-    // yeah yeah this can be raced even with atomic. I don't care not be deal
-    int index = synthesizerThreadIndex++ % synthesizerThreadPool.size();
-    index = index % synthesizerThreadPool.size();
-    synthesizerThreadPool.getLoop(index)->queueInLoop(async_func([=, this]() mutable -> Task<> {
+    synthesizerThreadPool.getNextLoop()->queueInLoop(async_func([=, this]() mutable -> Task<> {
         co_await handleNewMessageAsync(wsConnPtr, std::move(message), type);
     }));
 }
@@ -286,7 +282,7 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
 #ifdef BIG_ENDIAN
         // Convert to little endian
         for(int16_t& sample : pcm)
-            sample = (num >> 8) | (num << 8);
+            sample = (sample >> 8) | (sample << 8);
 #endif
         wsConnPtr->send((char*)pcm.data(), pcm.size() * sizeof(int16_t), WebSocketMessageType::Binary);
     }, params.length_scale, params.noise_scale, params.noise_w);
@@ -322,10 +318,7 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
             co_return makeBadRequestResponse("Invalid Authorization");
     }
 
-    int id = synthesizerThreadIndex++;
-    if(synthesizerThreadIndex >= synthesizerThreadPool.size())
-        synthesizerThreadIndex = 0;
-    auto loop = synthesizerThreadPool.getLoop(id % synthesizerThreadPool.size());
+    auto loop = synthesizerThreadPool.getNextLoop();
     co_await switchThreadCoro(loop);
 
 
