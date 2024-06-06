@@ -32,7 +32,7 @@ auto speak(const std::string& text, std::optional<size_t> speaker_id, Func cb, s
 
     try {
         piper::textToAudio(piperConfig, voice, text, audioBuffer, result, callback, speaker_id,
-            length_scale, noise_scale, noise_w);
+            noise_scale, length_scale, noise_w);
     }
     catch(const std::exception& e) {
         LOG_ERROR << "Exception thrown while generating speach: " << e.what();
