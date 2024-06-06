@@ -16,8 +16,6 @@ Before building, you will need to fulfill the following dependencies
 (API/Web server)
 * Drogon
 * libsoxr
-* libogg
-* libopus
 * libopusenc
     * You'll need to build this from source if on Ubuntu 22.04. Package available starting on 23.04
 
