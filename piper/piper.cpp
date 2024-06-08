@@ -321,6 +321,11 @@ void OnnxDecoderInferer::load(std::string path, std::string accelerator)
       cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchHeuristic;
       options.AppendExecutionProvider_CUDA(cuda_options);
     }
+    else if (accelerator == "tensorrt") {
+        // Use TensorRT provider
+        OrtTensorRTProviderOptions tensorrt_options{};
+        options.AppendExecutionProvider_TensorRT(tensorrt_options);
+    }
     
     //options.DisableCpuMemArena();
     //options.DisableMemPattern();
@@ -390,12 +395,15 @@ void EncoderInferer::load(std::string path, std::string accelerator)
     options.SetGraphOptimizationLevel(
         GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
     options.DisableProfiling();
+#if 0
+    // CUDA is slower then the CPU at running the encoder
     if (accelerator == "cuda") {
       // Use CUDA provider
       OrtCUDAProviderOptions cuda_options{};
       cuda_options.cudnn_conv_algo_search = OrtCudnnConvAlgoSearchHeuristic;
       options.AppendExecutionProvider_CUDA(cuda_options);
     }
+#endif
     
     // Makes encoder slower
     //options.SetExecutionMode(ExecutionMode::ORT_PARALLEL);
