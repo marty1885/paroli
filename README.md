@@ -88,6 +88,11 @@ Some 100% legal models are provided on [HuggingFace](https://huggingface.co/mart
 
 By default the models run on the CPU and could be power hungry and slow. If you'd like to use a GPU and, etc.. You can pass the `--accelerator cuda` flag in the CLI to enable it. For now the only supported accelerator is CUDA. But ROCm can be easily supported, just I don't have the hardware to test it. Feel free to contribute.
 
+This is the list of supported accelerators:
+* `cuda` - NVIDIA CUDA
+* `tensorrt` - NVIDIA TensorRT
+
+
 ### Rockchip NPU (RK3588)
 
 Additionally, on RK3588 based systems, the NPU support can be enabled by passing `-DUSE_RKNN=ON` into CMake and passing an RKNN model instead of ONNX as the decoder. Resulting in ~4.3x speedup compare to running on the RK3588 CPU cores. Note that the `accelerator` flag has no effect when the a RKNN model is used and only the decoder can run on the RK3588 NPU.
