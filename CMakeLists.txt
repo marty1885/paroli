@@ -33,6 +33,7 @@ add_library(piper
 if (USE_RKNN)
     target_compile_definitions(piper PRIVATE USE_RKNN)
     target_sources(piper PRIVATE piper/rknn-inferer.cpp)
+    target_link_libraries(piper PRIVATE rknn)
 endif()
 target_precompile_headers(piper PRIVATE piper/pch.hpp)
 
@@ -43,8 +44,7 @@ target_link_libraries(piper
     piper_phonemize
     pthread
     fmt::fmt
-    dl
-    rknnrt)
+    dl)
 
 target_include_directories(piper
     PUBLIC
