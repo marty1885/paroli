@@ -33,7 +33,7 @@ add_library(piper
 if (USE_RKNN)
     target_compile_definitions(piper PRIVATE USE_RKNN)
     target_sources(piper PRIVATE piper/rknn-inferer.cpp)
-    target_link_libraries(piper PRIVATE rknn)
+    target_link_libraries(piper PRIVATE rknnrt)
 endif()
 target_precompile_headers(piper PRIVATE piper/pch.hpp)
 
