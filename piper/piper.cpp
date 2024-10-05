@@ -710,8 +710,10 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
             // average the samples in the compare window to smooth out the transition even more
             auto prev_base_ptr = audioBuffer.end() - compare_window;
             auto next_base_ptr = real_start - compare_window;
-            for(size_t j=0;j<compare_window;j++)
-                prev_base_ptr[j] = (prev_base_ptr[j] + next_base_ptr[j]) / 2;
+            for(size_t j=0;j<compare_window;j++) {
+                float weight = (float)j / (float)compare_window;
+                prev_base_ptr[j] = prev_base_ptr[j] * (1.0f - weight) + next_base_ptr[j] * weight;
+            }
           }
 
           auto real_end = chunk_audio.end() - end_pad * 256;
