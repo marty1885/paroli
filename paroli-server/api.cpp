@@ -268,6 +268,7 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
             auto opus = encoder.encode(pcm);
             if(!opus.empty())
                 wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
+            return;
         }
 
         if constexpr (std::endian::native == std::endian::big) {
