@@ -26,7 +26,7 @@ StreamingOggOpusEncoder::StreamingOggOpusEncoder(size_t sr, size_t nchannels, si
 {
     auto write_func = [](void* user_data, const unsigned char* ptr, opus_int32 size) -> int {
         StreamingOggOpusEncoder* self = (StreamingOggOpusEncoder*)user_data;
-        auto buffer = (std::vector<uint8_t>*)&self->oggBuffer;
+        auto buffer = &self->oggBuffer;
         auto old_size = buffer->size();
         buffer->resize(old_size + size);
         memcpy(buffer->data() + old_size, ptr, size);
@@ -58,17 +58,15 @@ std::vector<uint8_t> StreamingOggOpusEncoder::encode(const std::vector<short>& d
 {
     oggBuffer.clear();
     audioBuffer.insert(audioBuffer.end(), data.begin(), data.end());
-    const size_t frame_size = sr * 0.02 * nchannels;
+    const size_t frame_size = 960;
+    if(audioBuffer.size() < frame_size * nchannels)
+        return {};
     size_t i = 0;
     size_t end = (audioBuffer.size() / frame_size) * frame_size;
     for(i = 0; i < end; i += frame_size) {
-        size_t idx_begin = i;
-        size_t idx_end = i + frame_size;
-        size_t samples_per_channel = (idx_end - idx_begin) / nchannels;
-        // should not happen. but just in case to avoid OOB access
-        if(samples_per_channel == 0)
-            break;
-        ope_encoder_write(encoder.get(), audioBuffer.data() + idx_begin, samples_per_channel);
+        int err = ope_encoder_write(encoder.get(), audioBuffer.data() + i, frame_size);
+        if(err != 0)
+            throw std::runtime_error("opusenc failed to encode");
     }
     audioBuffer.erase(audioBuffer.begin(), audioBuffer.begin() + end);
 

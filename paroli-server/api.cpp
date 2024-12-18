@@ -266,8 +266,8 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
         auto pcm = resample(view, voice.synthesisConfig.sampleRate, 24000, 1);
         if(send_opus) {
             auto opus = encoder.encode(pcm);
-            wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
-            return;
+            if(!opus.empty())
+                wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
         }
 
         if constexpr (std::endian::native == std::endian::big) {
