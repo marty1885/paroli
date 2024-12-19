@@ -263,8 +263,8 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
     bool ok = speak(params.text, params.speaker_id, [&](const std::span<const short> view) {
         if(view.empty())
             return;
-        auto pcm = resample(view, voice.synthesisConfig.sampleRate, 24000, 1);
         if(send_opus) {
+            auto pcm = resample(view, voice.synthesisConfig.sampleRate, 24000, 1);
             auto opus = encoder.encode(pcm);
             if(!opus.empty())
                 wsConnPtr->send((char*)opus.data(), opus.size(), WebSocketMessageType::Binary);
@@ -273,10 +273,13 @@ Task<> v1ws::handleNewMessageAsync(WebSocketConnectionPtr wsConnPtr, std::string
 
         if constexpr (std::endian::native == std::endian::big) {
             // Convert to little endian
+            std::vector<int16_t> pcm(view.begin(), view.end());
             for(int16_t& sample : pcm)
                 sample = (sample >> 8) | (sample << 8);
+            wsConnPtr->send((char*)pcm.data(), pcm.size() * sizeof(int16_t), WebSocketMessageType::Binary);
+            return;
         }
-        wsConnPtr->send((char*)pcm.data(), pcm.size() * sizeof(int16_t), WebSocketMessageType::Binary);
+        wsConnPtr->send((char*)view.data(), view.size() * sizeof(int16_t), WebSocketMessageType::Binary);
     }, params.length_scale, params.noise_scale, params.noise_w);
 
     if(!ok) {
