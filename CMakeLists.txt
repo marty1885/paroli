@@ -33,7 +33,12 @@ add_library(piper
 if (USE_RKNN)
     target_compile_definitions(piper PRIVATE USE_RKNN)
     target_sources(piper PRIVATE piper/rknn-inferer.cpp)
-    target_link_libraries(piper PRIVATE rknnrt)
+    if (EXISTS "/usr/lib/librknnrt.so")
+        target_link_libraries(piper PRIVATE /usr/lib/librknnrt.so)
+        message(STATUS "RKNN library found and loaded: /usr/lib/librknnrt.so")
+    else()
+        message(FATAL_ERROR "RKNN library not found: /usr/lib/librknnrt.so")
+    endif()
 endif()
 target_precompile_headers(piper PRIVATE piper/pch.hpp)
 
