@@ -93,7 +93,7 @@ cp -r ~/piper_phonemize/share/espeak-ng-data/ .
 ### The Command to transform text to wav
 
 ```plaintext
-./paroli-cli --encoder ~/piper-paroli-rknn-model/encoder.onnx --decoder ~/piper-paroli-rknn-model/decoder.rknn -c ~/piper-paroli-rknn-model/model.json
+./paroli-cli --encoder /home/orangepi/piper-paroli-rknn-model/encoder.onnx --decoder /home/orangepi/piper-paroli-rknn-model/decoder.rknn -c ~/piper-paroli-rknn-model/config.json
 ```
 After piper loaded, paste the text into the shell, then it will transform to wav.
 
@@ -106,7 +106,7 @@ An web API server is also provided so other applications can easily perform text
 To run it:
 
 ```bash
-./paroli-server --encoder ~/piper-paroli-rknn-model/encoder.onnx --decoder ~/piper-paroli-rknn-model/decoder.rknn -c ~/piper-paroli-rknn-model/model.json --ip 0.0.0.0 --port 8848
+./paroli-server --encoder /home/orangepi/piper-paroli-rknn-model/encoder.onnx --decoder /home/orangepi/piper-paroli-rknn-model/decoder.rknn -c ~/piper-paroli-rknn-model/config.json --ip 0.0.0.0 --port 8848
 ```
 Same as the CLI, change the `decoder.rknn` to your Orange Pi model, for example with Orange Pi 5 series, you will use `decoder-3588.rknn`; if you are using Orange Pi 3B, use `decoder-3566.rknn`
 
