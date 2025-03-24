@@ -4,7 +4,7 @@ Streaming mode implementation of the Piper TTS system in C++ with RK3588/3566 NP
 
 ## How to use
 
-Assuming you are running Ubuntu/Debian clean on your Orange Pi RK3588/3566.
+Assuming you are running Ubuntu/Debian clean on your Orange Pi RK3588/3566 (Orange Pi 5 series/ Orange Pi 3B)
 
 1. You first need to instal rknpu lib, the fastest way is using Petrolus ezrknn installer
 
