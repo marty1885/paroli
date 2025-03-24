@@ -1,46 +1,95 @@
 # Paroli
 
-Streaming mode implementation of the Piper TTS system in C++ with (optional) RK3588 NPU acceleration support. Named after "speaking" in Esperanto.
+Streaming mode implementation of the Piper TTS system in C++ with (optional) RK3588/3566 NPU acceleration support. 
 
 ## How to use
 
-Before building, you will need to fulfill the following dependencies
+Assuming you are running Ubuntu/Debian clean on your Orange Pi RK3588/3566.
 
-* xtensor
-* spdlog
-* libfmt
-* piper-phoenomize
-* onnxruntime (1.14 or 1.15)
-* A C++20 capable compiler
-
-(API/Web server)
-* Drogon
-* libsoxr
-* libopusenc
-    * You'll need to build this from source if on Ubuntu 22.04. Package available starting on 23.04
-
-(RKNN support)
-* [rknnrt >= 1.6.0](https://github.com/rockchip-linux/rknn-toolkit2/tree/v1.6.0/rknpu2/runtime/Linux/librknn_api)
-
-In which `piper-phoenomize` and `onnxruntime` binary (not the source! Unless you want to build yourselves!) likely needs to be downloaded and decompressed manually. Afterwards run CMake and point to the folders you recompressed them.
+1. You first need to instal rknpu lib, the fastest way is using Petrolus ezrknn installer
 
 ```bash
+https://github.com/Pelochus/ezrknn-toolkit2
+cd ezrknn-toolkit2
+sudo bash install.sh
+```
+
+2. then you need to install git-lfs to clone models (which is large size)
+```bash
+(. /etc/lsb-release && curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo env os=ubuntu dist="${DISTRIB_CODENAME}" bash)
+sudo apt-get install git-lfs
+```
+
+3. Install some dependencies
+```bash
+sudo apt install -y cmake build-essential
+sudo apt install -y libxtensor-dev nlohmann-json3-dev libspdlog-dev libopus-dev libfmt-dev libjsoncpp-dev
+sudo apt install -y espeak-ng libespeak-ng-dev libogg-dev libsoxr-dev
+```
+4. Install drogon
+```bash
+cd ~
+sudo apt install libssl-dev pkg-config libbotan-2-dev libc-ares-dev uuid-dev doxygen
+git clone https://github.com/drogonframework/drogon
+cd drogon
+git submodule update --init --recursive
 mkdir build
 cd build
-cmake .. -DORT_ROOT=/path/to/your/onnxruntime-linux-aarch64-1.14.1 -DPIPER_PHONEMIZE_ROOT=/path/to/your/piper-phonemize-2023-11-14 -DCMAKE_BUILD_TYPE=Release
-make -j
-# IMPORTANT! Copy espeak-ng-data or pass `--espeak_data` CLI flag
-cp -r /path/to/your/piper-phonemize-2023-11-14/share/espeak-ng-data .
+cmake ..
+make -j4
+sudo make install
 ```
+5. Install libopusenc
+```bash
+cd ~
+wget https://archive.mozilla.org/pub/opus/libopusenc-0.2.1.tar.gz
+tar -xvzf libopusenc-0.2.1.tar.gz
+cd libopusenc-0.2.1
+./configure
+make -j4
+sudo make install
+```
+this part is optional, some time the ldconfig not update your /usr/local/lib, then you need to do it manually
+`sudo nano /etc/ld.so.conf.d/local.conf`
+add this line `/usr/local/lib` then save and exit
 
-Afterwards run `paroli-cli` and type into the console to synthesize speech. Please refer to later sections for generating the models.
+7. Cloning models
+```bash
+cd ~
+https://huggingface.co/thanhtantran/piper-paroli-rknn-model
+```
+8. Clone onnxruntime
+```bash
+cd ~
+wget https://github.com/microsoft/onnxruntime/releases/download/v1.21.0/onnxruntime-linux-aarch64-1.21.0.tgz
+tar -xvf onnxruntime-linux-aarch64-1.21.0.tgz
+```
+10. Clone piper-phoemize
+```bash
+cd ~
+wget https://github.com/rhasspy/piper-phonemize/releases/download/2023.11.14-4/piper-phonemize_linux_aarch64.tar.gz
+tar -xvf piper-phonemize_linux_aarch64.tar.gz
+```
+12. Now build the app
+```bash
+git clone https://github.com/thanhtantran/paroli
+cd paroli
+mkdir build && cd build
+cmake .. -DUSE_RKNN=ON -DORT_ROOT=/home/admin/onnxruntime-linux-aarch64-1.21.0 -DPIPER_PHONEMIZE_ROOT=/home/admin/piper_phonemize -DCMAKE_BUILD_TYPE=Release
+make -j4
+```
+After cmake run, you will see wherether the lib `librknnrt.so` is loaded or not, normally it should be in `/usr/lib/`
+
+After the program is compiled, you can use it inside the build folder
+
+### The Command to transform text to wav
 
 ```plaintext
-./paroli-cli --encoder /path/to/your/encoder.onnx --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json
-...
-[2023-12-23 03:13:12.452] [paroli] [info] Wrote /home/marty/Documents/rkpiper/build/./1703301190238261389.wav
-[2023-12-23 03:13:12.452] [paroli] [info] Real-time factor: 0.16085024956315996 (infer=2.201744556427002 sec, audio=13.688163757324219 sec)
+./paroli-cli --encoder ~/piper-paroli-rknn-model/encoder.onnx --decoder ~/piper-paroli-rknn-model/decoder.rknn -c ~/piper-paroli-rknn-model/model.json
 ```
+After piper loaded, paste the text into the shell, then it will transform to wav.
+
+Change the `decoder.rknn` to your Orange Pi model, for example with Orange Pi 5 series, you will use `decoder-3588.rknn`; if you are using Orange Pi 3B, use `decoder-3566.rknn`
 
 ### The API server
 
@@ -49,8 +98,9 @@ An web API server is also provided so other applications can easily perform text
 To run it:
 
 ```bash
-./paroli-server --encoder /path/to/your/encoder.onnx --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json --ip 0.0.0.0 --port 8848
+./paroli-server --encoder ~/piper-paroli-rknn-model/encoder.onnx --decoder ~/piper-paroli-rknn-model/decoder.rknn -c ~/piper-paroli-rknn-model/model.json --ip 0.0.0.0 --port 8848
 ```
+Same as the CLI, change the `decoder.rknn` to your Orange Pi model, for example with Orange Pi 5 series, you will use `decoder-3588.rknn`; if you are using Orange Pi 3B, use `decoder-3566.rknn`
 
 And to invoke TSS
 
@@ -58,9 +108,9 @@ And to invoke TSS
 curl http://your.server.address:8848/api/v1/synthesise -X POST -H 'Content-Type: application/json' -d '{"text": "To be or not to be, that is the question"}' > test.opus
 ```
 
-Demo:
+### Demo
 
-[![Watch the video](https://img.youtube.com/vi/QkIF9FBrAM8/maxresdefault.jpg)](https://youtu.be/QkIF9FBrAM8)
+Video wait here ...
 
 #### Authentication
 
@@ -72,7 +122,7 @@ Authentication: Bearer <insert the token>
 
 **The Web UI will not work when authentication is enabled**
 
-## Obtaining models
+## Training models
 
 To obtain the encoder and decoder models, you'll either need to download them or creating one from checkpoints. Checkpoints are the trained raw model piper generates. Please refer to [piper's TRAINING.md](https://github.com/rhasspy/piper/blob/master/TRAINING.md) for details. To convert checkpoints into ONNX file pairs, you'll need [mush42's piper fork and the streaming branch](https://github.com/mush42/piper/tree/streaming). Run
 
@@ -82,22 +132,11 @@ python3 -m piper_train.export_onnx_streaming /path/to/your/traning/lighting_logs
 
 ### Downloading models
 
-Some 100% legal models are provided on [HuggingFace](https://huggingface.co/marty1885/streaming-piper/tree/main).
+Some 100% legal models are provided on [HuggingFace](https://huggingface.co/thanhtantran/piper-paroli-rknn-model)
 
-## Accelerators
+### Converting model to Rockchip NPU 
 
-By default the models run on the CPU and could be power hungry and slow. If you'd like to use a GPU and, etc.. You can pass the `--accelerator cuda` flag in the CLI to enable it. For now the only supported accelerator is CUDA. But ROCm can be easily supported, just I don't have the hardware to test it. Feel free to contribute.
-
-This is the list of supported accelerators:
-* `cuda` - NVIDIA CUDA
-* `tensorrt` - NVIDIA TensorRT
-
-
-### Rockchip NPU (RK3588)
-
-Additionally, on RK3588 based systems, the NPU support can be enabled by passing `-DUSE_RKNN=ON` into CMake and passing an RKNN model instead of ONNX as the decoder. Resulting in ~4.3x speedup compare to running on the RK3588 CPU cores. Note that the `accelerator` flag has no effect when the a RKNN model is used and only the decoder can run on the RK3588 NPU.
-
-Rockchip does not provide any package of some sort to install the libraries and headers. This has to be done manually.
+Also, converting ONNX to RKNN has to be done on an x64 computer. As of writing this document, you likely want to install the version for Python 3.10 as this is the same version that works with upstream piper. rknn-toolkit2 version 1.6.0 is required.
 
 ```bash
 git clone https://github.com/rockchip-linux/rknn-toolkit2
@@ -106,7 +145,7 @@ sudo cp aarch64/librknnrt.so /usr/lib/
 sudo cp include/* /usr/include/
 ```
 
-Also, converting ONNX to RKNN has to be done on an x64 computer. As of writing this document, you likely want to install the version for Python 3.10 as this is the same version that works with upstream piper. rknn-toolkit2 version 1.6.0 is required.
+Then convert your model
 
 ```bash
 # Install rknn-toolkit2
@@ -118,25 +157,10 @@ pip install rknn_toolkit2-1.6.0+81f21f4d-cp310-cp310-linux_x86_64.whl
 python tools/decoder2rknn.py /path/to/model/decoder.onnx /path/to/model/decoder.rknn
 ```
 
-To use RKNN for inference, simply pass the RKNN model in the CLI. An error will appear if RKNN is passed in but RKNN support not enabled during compiling.
+## Credit
 
-```bash
-./paroli-cli --encoder /path/to/your/encoder.rknn --decoder /path/to/your/decoder.onnx -c /path/to/your/model.json
-#                                           ^^^^
-#                                      The only change
-```
+- [Piper](!https://github.com/rhasspy/piper)
+- [Paroli original](!https://github.com/marty1885/paroli)
+- [Petrolus ezrknn toolkit](!https://github.com/Pelochus/ezrknn-toolkit2) 
 
-## Developer notes
 
-TODO:
-
-- [ ] Code cleanup
-- [ ] Investigate ArmNN to accelerate encoder inference
-- [ ] Better handling for authentication
-* RKNN
-    - [ ] Add dynamic shape support when Rockchip fixes them
-    - [ ] Try using quantization see if the speedup is worth the lowered quality
-
-## Notes
-
-There's no good way to reduce synthesis latency on RK3588 besides Rockchip improving rknnrt and their compiler. The encoder is a dynamic graph thus RKNN won't work. And how they implement multi-NPU co-process prohibits faster single batch inference. Multi batch can be made faster but I don't see the value of it as it is already fast enough for home use.
