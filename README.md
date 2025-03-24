@@ -1,6 +1,6 @@
 # Paroli
 
-Streaming mode implementation of the Piper TTS system in C++ with (optional) RK3588/3566 NPU acceleration support. 
+Streaming mode implementation of the Piper TTS system in C++ with RK3588/3566 NPU acceleration support. 
 
 ## How to use
 
