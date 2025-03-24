@@ -85,7 +85,10 @@ make -j4
 ```
 After cmake run, you will see wherether the lib `librknnrt.so` is loaded or not, normally it should be in `/usr/lib/`. If you see not loaded, that mean the lib still not installed. And you can not run with RKNPU accelerator.
 
-After all, the program is compiled, you can use it inside the build folder.
+After all, the program is compiled, you can use it inside the build folder. But still need one more step, this is important. Copy the `espeak-ng-data` from `piper_phonemize` into the build folder:
+```bash
+cp -r ~/piper_phonemize/share/espeak-ng-data/ .
+```
 
 ### The Command to transform text to wav
 
