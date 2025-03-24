@@ -26,6 +26,7 @@ sudo apt install -y cmake build-essential
 sudo apt install -y libxtensor-dev nlohmann-json3-dev libspdlog-dev libopus-dev libfmt-dev libjsoncpp-dev
 sudo apt install -y espeak-ng libespeak-ng-dev libogg-dev libsoxr-dev
 ```
+
 4. Install drogon
 ```bash
 cd ~
@@ -39,6 +40,7 @@ cmake ..
 make -j4
 sudo make install
 ```
+
 5. Install libopusenc
 ```bash
 cd ~
@@ -58,29 +60,32 @@ add this line `/usr/local/lib` then save and exit
 cd ~
 https://huggingface.co/thanhtantran/piper-paroli-rknn-model
 ```
+
 8. Clone onnxruntime
 ```bash
 cd ~
 wget https://github.com/microsoft/onnxruntime/releases/download/v1.21.0/onnxruntime-linux-aarch64-1.21.0.tgz
 tar -xvf onnxruntime-linux-aarch64-1.21.0.tgz
 ```
+
 10. Clone piper-phoemize
 ```bash
 cd ~
 wget https://github.com/rhasspy/piper-phonemize/releases/download/2023.11.14-4/piper-phonemize_linux_aarch64.tar.gz
 tar -xvf piper-phonemize_linux_aarch64.tar.gz
 ```
+
 12. Now build the app
 ```bash
 git clone https://github.com/thanhtantran/paroli
 cd paroli
 mkdir build && cd build
-cmake .. -DUSE_RKNN=ON -DORT_ROOT=/home/admin/onnxruntime-linux-aarch64-1.21.0 -DPIPER_PHONEMIZE_ROOT=/home/admin/piper_phonemize -DCMAKE_BUILD_TYPE=Release
+cmake .. -DUSE_RKNN=ON -DORT_ROOT=/home/orangepi/onnxruntime-linux-aarch64-1.21.0 -DPIPER_PHONEMIZE_ROOT=/home/orangepi/piper_phonemize -DCMAKE_BUILD_TYPE=Release
 make -j4
 ```
-After cmake run, you will see wherether the lib `librknnrt.so` is loaded or not, normally it should be in `/usr/lib/`
+After cmake run, you will see wherether the lib `librknnrt.so` is loaded or not, normally it should be in `/usr/lib/`. If you see not loaded, that mean the lib still not installed. And you can not run with RKNPU accelerator.
 
-After the program is compiled, you can use it inside the build folder
+After all, the program is compiled, you can use it inside the build folder.
 
 ### The Command to transform text to wav
 
