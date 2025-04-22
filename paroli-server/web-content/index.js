@@ -3,7 +3,7 @@ var ttsSocketURL = (window.location.toString().replace('http', 'ws') + 'api/v1/s
 var pcmplayer_opt = {
      encoding: '16bitInt',
      channels: 1,
-     sampleRate: 24000,
+     sampleRate: 22500,
      flushingTime: 100
 }
 var player;
