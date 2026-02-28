@@ -7,6 +7,7 @@
 #include <bit>
 #include <atomic>
 #include <coroutine>
+#include <cmath>
 
 #include "piper.hpp"
 #include "OggOpusEncoder.hpp"
@@ -17,6 +18,8 @@ using namespace drogon;
 extern piper::PiperConfig piperConfig;
 extern piper::Voice voice;
 extern std::string authToken;
+
+static constexpr size_t MAX_TEXT_LENGTH = 64 * 1024; // 64 KiB
 trantor::EventLoopThreadPool synthesizerThreadPool(3, "synehesizer thread pool");
 
 template<typename Func>
@@ -81,6 +84,11 @@ static std::string piperTextPreprocess(std::string text)
     if(last != std::string::npos)
         text = text.substr(0, last + 1);
 
+    if(text.empty()) {
+        text = ",";
+        return text;
+    }
+
     // append a comma if the text does not end with a punctuation
     const char* punctuation = ".,!?;:";
     bool has_punctuation = (strchr(punctuation, text.back()) != nullptr);
@@ -125,6 +133,8 @@ SynthesisApiParams parseSynthesisApiParams(const std::string_view json_txt)
     if(!json.contains("text"))
         throw std::runtime_error("Missing 'text' field");
     res.text = json["text"].get<std::string>();
+    if(res.text.size() > MAX_TEXT_LENGTH)
+        throw std::runtime_error("Text too long");
     if(json.contains("speaker_id") && json["speaker_id"].is_null() == false)
         res.speaker_id = json["speaker_id"].get<int64_t>();
     if(json.contains("speaker")) {
@@ -141,16 +151,22 @@ SynthesisApiParams parseSynthesisApiParams(const std::string_view json_txt)
         if(json["length_scale"].is_number() == false)
             throw std::runtime_error("length_scale must be a number");
         res.length_scale = json["length_scale"].get<float>();
+        if(!std::isfinite(*res.length_scale) || *res.length_scale <= 0.0f || *res.length_scale > 100.0f)
+            throw std::runtime_error("length_scale out of range");
     }
     if(json.contains("noise_scale")) {
         if(json["noise_scale"].is_number() == false)
             throw std::runtime_error("noise_scale must be a number");
         res.noise_scale = json["noise_scale"].get<float>();
+        if(!std::isfinite(*res.noise_scale) || *res.noise_scale < 0.0f || *res.noise_scale > 100.0f)
+            throw std::runtime_error("noise_scale out of range");
     }
     if(json.contains("noise_w")) {
         if(json["noise_w"].is_number() == false)
             throw std::runtime_error("noise_w must be a number");
         res.noise_w = json["noise_w"].get<float>();
+        if(!std::isfinite(*res.noise_w) || *res.noise_w < 0.0f || *res.noise_w > 100.0f)
+            throw std::runtime_error("noise_w out of range");
     }
     if(json.contains("audio_format")) {
         if(json["audio_format"].is_string() == false)
@@ -158,7 +174,7 @@ SynthesisApiParams parseSynthesisApiParams(const std::string_view json_txt)
         res.audio_format = json["audio_format"].get<std::string>();
     }
 
-    if(res.speaker_id.has_value() && *res.speaker_id > voice.modelConfig.numSpeakers)
+    if(res.speaker_id.has_value() && (*res.speaker_id < 0 || *res.speaker_id >= voice.modelConfig.numSpeakers))
         throw std::runtime_error("Speaker ID is out of range");
 
     res.text = piperTextPreprocess(res.text);
@@ -230,7 +246,7 @@ struct ParallelSynthAwaiter : drogon::CallbackAwaiter<void>
                     if (!exceptionCaptured_.test_and_set(std::memory_order_acq_rel))
                         setException(std::current_exception());
                 }
-                if (completed_.fetch_add(1, std::memory_order_acq_rel) + 1 == static_cast<int>(n))
+                if (completed_.fetch_add(1, std::memory_order_acq_rel) + 1 == n)
                     handle.resume();
             });
         }
@@ -246,7 +262,7 @@ private:
     std::optional<float> noiseScale_;
     std::optional<float> lengthScale_;
     std::optional<float> noiseW_;
-    std::atomic<int> completed_{0};
+    std::atomic<size_t> completed_{0};
     std::atomic_flag exceptionCaptured_{};
 };
 
@@ -418,7 +434,7 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
     if (req->getContentType() != CT_APPLICATION_JSON)
         co_return makeBadRequestResponse("Content-Type must be application/json");
 
-    if(authToken.empty() == false) {
+    if(!authToken.empty()) {
         auto auth = req->getHeader("Authorization");
         if(auth.empty() || auth != "Bearer " + authToken)
             co_return makeBadRequestResponse("Invalid Authorization");
@@ -524,7 +540,10 @@ Task<HttpResponsePtr> audio::speech(const HttpRequestPtr req)
         co_return makeBadRequestResponse("Missing or invalid 'input' field");
 
     SynthesisApiParams params;
-    params.text = piperTextPreprocess(json["input"].get<std::string>());
+    auto inputText = json["input"].get<std::string>();
+    if(inputText.size() > MAX_TEXT_LENGTH)
+        co_return makeBadRequestResponse("Text too long");
+    params.text = piperTextPreprocess(std::move(inputText));
 
     // Resolve "voice" to speaker_id (numeric string or case-insensitive name)
     if(json.contains("voice") && json["voice"].is_string()) {

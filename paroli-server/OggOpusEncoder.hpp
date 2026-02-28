@@ -5,10 +5,10 @@
 #include <unistd.h>
 #include <opus/opusenc.h>
 
-std::vector<uint8_t> encodeOgg(const std::vector<short>& data, size_t sr, size_t nchannels, size_t bitrate = 96000);
+std::vector<uint8_t> encodeOgg(const std::vector<short>& data, size_t sr, size_t nchannels, size_t bitrate = 32000);
 
 struct StreamingOggOpusEncoder {
-    StreamingOggOpusEncoder(size_t sr, size_t nchannels, size_t bitrate = 96000);
+    StreamingOggOpusEncoder(size_t sr, size_t nchannels, size_t bitrate = 32000);
 
     std::vector<uint8_t> encode(const std::vector<short>& data);
     std::vector<uint8_t> finish();
