@@ -194,6 +194,34 @@ HttpResponsePtr makeBadRequestResponse(const std::string &msg)
     return resp;
 }
 
+// Shared synthesis core: speak → collect audio → encode → response
+static HttpResponsePtr doSynthesis(const SynthesisApiParams& params)
+{
+    std::vector<short> audio;
+    audio.reserve(voice.synthesisConfig.sampleRate);
+    bool ok = speak(params.text, params.speaker_id, [&audio](std::span<const short> view) {
+        auto old_size = audio.size();
+        audio.resize(old_size + view.size());
+        std::copy(view.begin(), view.end(), audio.begin() + old_size);
+    }, params.length_scale, params.noise_scale, params.noise_w);
+    if(!ok)
+        return makeBadRequestResponse("Failed to synthesise text");
+
+    auto resp = HttpResponse::newHttpResponse();
+    if(params.audio_format.value_or("opus") == "opus") {
+        auto pcm = resample(audio, voice.synthesisConfig.sampleRate, 24000, 1);
+        auto opus = encodeOgg(pcm, 24000, 1);
+        resp->setContentTypeString("audio/ogg; codecs=opus");
+        resp->setBody(std::string(reinterpret_cast<const char*>(opus.data()), opus.size()));
+        return resp;
+    }
+
+    resp->setStatusCode(k200OK);
+    resp->setContentTypeString("audio/raw");
+    resp->setBody(std::string(reinterpret_cast<const char*>(audio.data()), audio.size() * sizeof(int16_t)));
+    return resp;
+}
+
 namespace api
 {
 struct v1 : public HttpController<v1>
@@ -325,29 +353,7 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
         co_return makeBadRequestResponse(e.what());
     }
 
-    std::vector<short> audio;
-    audio.reserve(voice.synthesisConfig.sampleRate); // reserve some to reduce reallocation
-    bool ok = speak(params.text, params.speaker_id, [&audio](std::span<const short> view) {
-        auto old_size = audio.size();
-        audio.resize(old_size + view.size());
-        std::copy(view.begin(), view.end(), audio.begin() + old_size);
-    }, params.length_scale, params.noise_scale, params.noise_w);
-    if(!ok)
-        co_return makeBadRequestResponse("Failed to synthesise text");
-
-    auto resp = HttpResponse::newHttpResponse();
-    if(params.audio_format.value_or("opus") == "opus") {
-        auto pcm = resample(audio, voice.synthesisConfig.sampleRate, 24000, 1);
-        auto opus = encodeOgg(pcm, 24000, 1);
-        resp->setContentTypeString("audio/ogg; codecs=opus");
-        resp->setBody(std::string(reinterpret_cast<const char*>(opus.data()), opus.size()));
-        co_return resp;
-    }
-
-    resp->setStatusCode(k200OK);
-    resp->setContentTypeString("audio/raw");
-    resp->setBody(std::string(reinterpret_cast<const char*>(audio.data()), audio.size() * sizeof(int16_t)));
-    co_return resp;
+    co_return doSynthesis(params);
 }
 
 Task<HttpResponsePtr> v1::speakers(const HttpRequestPtr req)
@@ -401,46 +407,43 @@ Task<HttpResponsePtr> audio::speech(const HttpRequestPtr req)
     auto loop = synthesizerThreadPool.getNextLoop();
     co_await switchThreadCoro(loop);
 
+    // Translate OpenAI request format into SynthesisApiParams
     nlohmann::json json;
     try {
         json = nlohmann::json::parse(req->getBody());
     }
     catch (const std::exception&) {
-        auto resp = HttpResponse::newHttpResponse();
-        resp->setStatusCode(k400BadRequest);
-        resp->setContentTypeCode(CT_APPLICATION_JSON);
-        resp->setBody(R"({"error":{"message":"Invalid JSON","type":"invalid_request_error"}})");
-        co_return resp;
+        co_return makeBadRequestResponse("Invalid JSON");
     }
 
-    if(!json.contains("input") || !json["input"].is_string()) {
-        auto resp = HttpResponse::newHttpResponse();
-        resp->setStatusCode(k400BadRequest);
-        resp->setContentTypeCode(CT_APPLICATION_JSON);
-        resp->setBody(R"({"error":{"message":"Missing or invalid 'input' field","type":"invalid_request_error"}})");
-        co_return resp;
+    if(!json.contains("input") || !json["input"].is_string())
+        co_return makeBadRequestResponse("Missing or invalid 'input' field");
+
+    SynthesisApiParams params;
+    params.text = piperTextPreprocess(json["input"].get<std::string>());
+
+    // Resolve "voice" to speaker_id (numeric string or case-insensitive name)
+    if(json.contains("voice") && json["voice"].is_string()) {
+        auto v = json["voice"].get<std::string>();
+        char* end = nullptr;
+        long id = std::strtol(v.c_str(), &end, 10);
+        if(end != v.c_str() && *end == '\0' && id >= 0) {
+            params.speaker_id = static_cast<int64_t>(id);
+        } else {
+            const auto& map = voice.modelConfig.speakerIdMap;
+            if(map.has_value()) {
+                for(const auto& [name, sid] : *map) {
+                    if(name.size() == v.size() && std::equal(name.begin(), name.end(), v.begin(),
+                        [](char a, char b){ return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); })) {
+                        params.speaker_id = static_cast<int64_t>(sid);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
-    std::string text = piperTextPreprocess(json["input"].get<std::string>());
-
-    std::vector<short> audioBuffer;
-    audioBuffer.reserve(voice.synthesisConfig.sampleRate);
-    bool ok = speak(text, 0, [&audioBuffer](std::span<const short> view) {
-        auto old_size = audioBuffer.size();
-        audioBuffer.resize(old_size + view.size());
-        std::copy(view.begin(), view.end(), audioBuffer.begin() + old_size);
-    }, std::nullopt, std::nullopt, std::nullopt);
-
-    if(!ok)
-        co_return makeBadRequestResponse("Synthesis failed");
-
-    auto pcm = resample(audioBuffer, voice.synthesisConfig.sampleRate, 24000, 1);
-    auto opus = encodeOgg(pcm, 24000, 1);
-
-    auto resp = HttpResponse::newHttpResponse();
-    resp->setContentTypeString("audio/ogg; codecs=opus");
-    resp->setBody(std::string(reinterpret_cast<const char*>(opus.data()), opus.size()));
-    co_return resp;
+    co_return doSynthesis(params);
 }
 } // namespace v1
 
