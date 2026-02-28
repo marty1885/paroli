@@ -369,3 +369,78 @@ Task<HttpResponsePtr> v1::speakers(const HttpRequestPtr req)
 
 } // namespace api
 
+namespace v1
+{
+struct audio : public HttpController<audio>
+{
+    METHOD_LIST_BEGIN
+    METHOD_ADD(audio::speech, "/speech", {Post, Options});
+    METHOD_LIST_END
+
+    Task<HttpResponsePtr> speech(const HttpRequestPtr req);
+};
+
+Task<HttpResponsePtr> audio::speech(const HttpRequestPtr req)
+{
+    if(req->method() == Options) {
+        auto resp = HttpResponse::newHttpResponse();
+        resp->addHeader("Access-Control-Allow-Origin", "*");
+        resp->addHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+        co_return resp;
+    }
+
+    if (req->getContentType() != CT_APPLICATION_JSON)
+        co_return makeBadRequestResponse("Content-Type must be application/json");
+
+    if(!authToken.empty()) {
+        auto auth = req->getHeader("Authorization");
+        if(auth.empty() || auth != "Bearer " + authToken)
+            co_return makeBadRequestResponse("Invalid Authorization");
+    }
+
+    auto loop = synthesizerThreadPool.getNextLoop();
+    co_await switchThreadCoro(loop);
+
+    nlohmann::json json;
+    try {
+        json = nlohmann::json::parse(req->getBody());
+    }
+    catch (const std::exception&) {
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k400BadRequest);
+        resp->setContentTypeCode(CT_APPLICATION_JSON);
+        resp->setBody(R"({"error":{"message":"Invalid JSON","type":"invalid_request_error"}})");
+        co_return resp;
+    }
+
+    if(!json.contains("input") || !json["input"].is_string()) {
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k400BadRequest);
+        resp->setContentTypeCode(CT_APPLICATION_JSON);
+        resp->setBody(R"({"error":{"message":"Missing or invalid 'input' field","type":"invalid_request_error"}})");
+        co_return resp;
+    }
+
+    std::string text = piperTextPreprocess(json["input"].get<std::string>());
+
+    std::vector<short> audioBuffer;
+    audioBuffer.reserve(voice.synthesisConfig.sampleRate);
+    bool ok = speak(text, 0, [&audioBuffer](std::span<const short> view) {
+        auto old_size = audioBuffer.size();
+        audioBuffer.resize(old_size + view.size());
+        std::copy(view.begin(), view.end(), audioBuffer.begin() + old_size);
+    }, std::nullopt, std::nullopt, std::nullopt);
+
+    if(!ok)
+        co_return makeBadRequestResponse("Synthesis failed");
+
+    auto pcm = resample(audioBuffer, voice.synthesisConfig.sampleRate, 24000, 1);
+    auto opus = encodeOgg(pcm, 24000, 1);
+
+    auto resp = HttpResponse::newHttpResponse();
+    resp->setContentTypeString("audio/ogg; codecs=opus");
+    resp->setBody(std::string(reinterpret_cast<const char*>(opus.data()), opus.size()));
+    co_return resp;
+}
+} // namespace v1
+
