@@ -113,6 +113,22 @@ struct SynthesisResult {
   double realTimeFactor;
 };
 
+// Phoneme data for a single phrase, ready for synthesis
+struct PhonemePhrase {
+  std::vector<PhonemeId> phonemeIds;
+  float silenceSeconds = 0; // silence to insert after this phrase
+};
+
+// Phoneme data for a single sentence
+struct PhonemeSentence {
+  std::vector<PhonemePhrase> phrases;
+};
+
+// Complete result of phonemization, ready for synthesis
+struct PhonemeData {
+  std::vector<PhonemeSentence> sentences;
+};
+
 struct Voice {
   json configRoot;
   PhonemizeConfig phonemizeConfig;
@@ -152,6 +168,18 @@ void textToAudio(PiperConfig &config, Voice &voice, std::string text,
                  std::optional<float> noiseScale = std::nullopt,
                  std::optional<float> lengthScale = std::nullopt,
                  std::optional<float> noiseW = std::nullopt);
+
+// Phonemize text into phoneme IDs, split into sentences and phrases
+PhonemeData phonemize(PiperConfig &config, Voice &voice, std::string text);
+
+// Synthesize audio from pre-phonemized data
+void synthesize(Voice &voice, const PhonemeData &phonemeData,
+                std::vector<int16_t> &audioBuffer, SynthesisResult &result,
+                const std::function<void()> &audioCallback,
+                std::optional<size_t> speakerId = std::nullopt,
+                std::optional<float> noiseScale = std::nullopt,
+                std::optional<float> lengthScale = std::nullopt,
+                std::optional<float> noiseW = std::nullopt);
 
 // Phonemize text and synthesize audio to WAV file
 void textToWavFile(PiperConfig &config, Voice &voice, std::string text,

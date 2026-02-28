@@ -5,6 +5,8 @@
 
 #include <span>
 #include <bit>
+#include <atomic>
+#include <coroutine>
 
 #include "piper.hpp"
 #include "OggOpusEncoder.hpp"
@@ -194,32 +196,113 @@ HttpResponsePtr makeBadRequestResponse(const std::string &msg)
     return resp;
 }
 
-// Shared synthesis core: speak → collect audio → encode → response
-static HttpResponsePtr doSynthesis(const SynthesisApiParams& params)
+// Awaiter that dispatches per-sentence synthesize() calls across the thread pool.
+// The last task to complete (atomic counter == N) resumes the suspended coroutine.
+struct ParallelSynthAwaiter : drogon::CallbackAwaiter<void>
 {
-    std::vector<short> audio;
-    audio.reserve(voice.synthesisConfig.sampleRate);
-    bool ok = speak(params.text, params.speaker_id, [&audio](std::span<const short> view) {
-        auto old_size = audio.size();
-        audio.resize(old_size + view.size());
-        std::copy(view.begin(), view.end(), audio.begin() + old_size);
-    }, params.length_scale, params.noise_scale, params.noise_w);
-    if(!ok)
-        return makeBadRequestResponse("Failed to synthesise text");
+    ParallelSynthAwaiter(
+        trantor::EventLoopThreadPool& pool,
+        piper::Voice& voice,
+        const piper::PhonemeData& phonemeData,
+        std::vector<std::vector<int16_t>>& sentenceAudio,
+        std::vector<piper::SynthesisResult>& sentenceResults,
+        std::optional<size_t> speakerId,
+        std::optional<float> noiseScale,
+        std::optional<float> lengthScale,
+        std::optional<float> noiseW)
+        : pool_(pool), voice_(voice), phonemeData_(phonemeData),
+          sentenceAudio_(sentenceAudio), sentenceResults_(sentenceResults),
+          speakerId_(speakerId), noiseScale_(noiseScale),
+          lengthScale_(lengthScale), noiseW_(noiseW) {}
 
-    auto resp = HttpResponse::newHttpResponse();
-    if(params.audio_format.value_or("opus") == "opus") {
-        auto pcm = resample(audio, voice.synthesisConfig.sampleRate, 24000, 1);
-        auto opus = encodeOgg(pcm, 24000, 1);
-        resp->setContentTypeString("audio/ogg; codecs=opus");
-        resp->setBody(std::string(reinterpret_cast<const char*>(opus.data()), opus.size()));
-        return resp;
+    void await_suspend(std::coroutine_handle<> handle)
+    {
+        const size_t n = phonemeData_.sentences.size();
+        for (size_t i = 0; i < n; i++) {
+            pool_.getNextLoop()->queueInLoop([this, i, n, handle]() {
+                try {
+                    piper::PhonemeData single;
+                    single.sentences.push_back(phonemeData_.sentences[i]);
+                    piper::synthesize(voice_, single, sentenceAudio_[i],
+                                     sentenceResults_[i], nullptr,
+                                     speakerId_, noiseScale_, lengthScale_, noiseW_);
+                } catch (...) {
+                    if (!exceptionCaptured_.test_and_set(std::memory_order_acq_rel))
+                        setException(std::current_exception());
+                }
+                if (completed_.fetch_add(1, std::memory_order_acq_rel) + 1 == static_cast<int>(n))
+                    handle.resume();
+            });
+        }
     }
 
-    resp->setStatusCode(k200OK);
-    resp->setContentTypeString("audio/raw");
-    resp->setBody(std::string(reinterpret_cast<const char*>(audio.data()), audio.size() * sizeof(int16_t)));
-    return resp;
+private:
+    trantor::EventLoopThreadPool& pool_;
+    piper::Voice& voice_;
+    const piper::PhonemeData& phonemeData_;
+    std::vector<std::vector<int16_t>>& sentenceAudio_;
+    std::vector<piper::SynthesisResult>& sentenceResults_;
+    std::optional<size_t> speakerId_;
+    std::optional<float> noiseScale_;
+    std::optional<float> lengthScale_;
+    std::optional<float> noiseW_;
+    std::atomic<int> completed_{0};
+    std::atomic_flag exceptionCaptured_{};
+};
+
+// Phonemize sequentially, then synthesize sentences in parallel across the pool.
+// Single-sentence texts skip the awaiter and synthesize inline.
+static Task<std::vector<int16_t>> doSynthesis(
+    const std::string& text,
+    std::optional<size_t> speakerId,
+    std::optional<float> noiseScale,
+    std::optional<float> lengthScale,
+    std::optional<float> noiseW)
+{
+    auto phonemeData = piper::phonemize(piperConfig, voice, text);
+    const size_t sentenceCount = phonemeData.sentences.size();
+    if (sentenceCount == 0)
+        co_return {};
+
+    // Fast path: single sentence, synthesize inline without queueInLoop overhead
+    if (sentenceCount == 1) {
+        std::vector<int16_t> audioBuffer;
+        piper::SynthesisResult result{};
+        audioBuffer.reserve(voice.synthesisConfig.sampleRate);
+        piper::synthesize(voice, phonemeData, audioBuffer, result, nullptr,
+                         speakerId, noiseScale, lengthScale, noiseW);
+        co_return audioBuffer;
+    }
+
+    // Multi-sentence: dispatch each sentence to the pool in parallel
+    std::vector<std::vector<int16_t>> sentenceAudio(sentenceCount);
+    std::vector<piper::SynthesisResult> sentenceResults(sentenceCount);
+
+    co_await ParallelSynthAwaiter(
+        synthesizerThreadPool, voice, phonemeData,
+        sentenceAudio, sentenceResults,
+        speakerId, noiseScale, lengthScale, noiseW);
+
+    // Stitch audio in sentence order (sentence silence already embedded by synthesize)
+    size_t totalSamples = 0;
+    for (const auto& audio : sentenceAudio)
+        totalSamples += audio.size();
+
+    std::vector<int16_t> stitched;
+    stitched.reserve(totalSamples);
+    for (auto& audio : sentenceAudio)
+        stitched.insert(stitched.end(), audio.begin(), audio.end());
+
+    // Accumulate stats
+    piper::SynthesisResult totalResult{};
+    for (const auto& r : sentenceResults) {
+        totalResult.inferSeconds += r.inferSeconds;
+        totalResult.audioSeconds += r.audioSeconds;
+    }
+    if (totalResult.audioSeconds > 0)
+        totalResult.realTimeFactor = totalResult.inferSeconds / totalResult.audioSeconds;
+
+    co_return stitched;
 }
 
 namespace api
@@ -353,7 +436,28 @@ Task<HttpResponsePtr> v1::synthesise(const HttpRequestPtr req)
         co_return makeBadRequestResponse(e.what());
     }
 
-    co_return doSynthesis(params);
+    std::vector<int16_t> audio;
+    try {
+        audio = co_await doSynthesis(params.text, params.speaker_id,
+                                     params.noise_scale, params.length_scale, params.noise_w);
+    }
+    catch (const std::exception& e) {
+        co_return makeBadRequestResponse(e.what());
+    }
+
+    auto resp = HttpResponse::newHttpResponse();
+    if(params.audio_format.value_or("opus") == "opus") {
+        auto pcm = resample(audio, voice.synthesisConfig.sampleRate, 24000, 1);
+        auto opus = encodeOgg(pcm, 24000, 1);
+        resp->setContentTypeString("audio/ogg; codecs=opus");
+        resp->setBody(std::string(reinterpret_cast<const char*>(opus.data()), opus.size()));
+        co_return resp;
+    }
+
+    resp->setStatusCode(k200OK);
+    resp->setContentTypeString("audio/raw");
+    resp->setBody(std::string(reinterpret_cast<const char*>(audio.data()), audio.size() * sizeof(int16_t)));
+    co_return resp;
 }
 
 Task<HttpResponsePtr> v1::speakers(const HttpRequestPtr req)
@@ -443,7 +547,22 @@ Task<HttpResponsePtr> audio::speech(const HttpRequestPtr req)
         }
     }
 
-    co_return doSynthesis(params);
+    std::vector<int16_t> audioBuffer;
+    try {
+        audioBuffer = co_await doSynthesis(params.text, params.speaker_id,
+                                           params.noise_scale, params.length_scale, params.noise_w);
+    }
+    catch (const std::exception& e) {
+        co_return makeBadRequestResponse(std::string("Synthesis failed: ") + e.what());
+    }
+
+    auto pcm = resample(audioBuffer, voice.synthesisConfig.sampleRate, 24000, 1);
+    auto opus = encodeOgg(pcm, 24000, 1);
+
+    auto resp = HttpResponse::newHttpResponse();
+    resp->setContentTypeString("audio/ogg; codecs=opus");
+    resp->setBody(std::string(reinterpret_cast<const char*>(opus.data()), opus.size()));
+    co_return resp;
 }
 } // namespace v1
 
