@@ -3,7 +3,7 @@ var ttsSocketURL = (window.location.toString().replace('http', 'ws') + 'api/v1/s
 var pcmplayer_opt = {
      encoding: '16bitInt',
      channels: 1,
-     sampleRate: 22500,
+     sampleRate: 22050, // replaced by the sample_rate the server announces for the loaded voice
      flushingTime: 100
 }
 var player;
@@ -45,7 +45,6 @@ function runTTS() {
         audio_format: 'pcm'
     })
     if (ws == null || ws.readyState != 1) {
-        player = new PCMPlayer(pcmplayer_opt);
         reconnectWS(function () {
             ws.send(data);
         });
@@ -67,8 +66,17 @@ function reconnectWS(connect_fn) {
 
           if(typeof event.data == 'string') {
               let msg = JSON.parse(event.data);
-              if(msg["status"] == "ok")
+              if(msg["status"] == "ok") {
+                  // The first text message of a pcm stream carries the voice's sample rate; the
+                  // player has to be built on it, so it is created here and not in runTTS.
+                  if(typeof msg["sample_rate"] != 'undefined' && !player) {
+                      // one voice per server process, so the announced rate never changes and the
+                      // player is built once, on the first stream
+                      pcmplayer_opt.sampleRate = msg["sample_rate"];
+                      player = new PCMPlayer(pcmplayer_opt);
+                  }
                   return;
+              }
               console.error(msg);
           }
           var data = new Uint8Array(event.data);

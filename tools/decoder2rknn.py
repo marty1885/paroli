@@ -6,6 +6,9 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('model', type=str, help='onnx model path')
 parser.add_argument('output', type=str, help='rknn output path')
+parser.add_argument('--target', type=str, default='RK3588',
+    help='target SoC for the compiled engine, one of the platforms the pinned RKNN Toolkit2 '
+         'supports (RK3588, RK3566, RK3568, RK3562, RK3576); a .rknn is not portable between chips')
 
 args = parser.parse_args()
 
@@ -20,7 +23,7 @@ if 'g' in input_names:
 
 
 rknn = RKNN()
-rknn.config(target_platform="RK3588")
+rknn.config(target_platform=args.target)
 ret = rknn.load_onnx(args.model,
     input_size_list=input_size_list,
     inputs=inputs,

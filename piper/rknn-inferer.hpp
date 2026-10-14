@@ -29,7 +29,6 @@ struct RknnDecoderInferer : public DecoderInferer {
   std::mutex mtx;
   std::vector<int> implTracker;
   std::condition_variable cv;
-  bool flag = false;
 
   std::vector<int16_t> infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const std::optional<xt::xarray<float>>& g) override;
   void load(std::string modelPath, std::string accelerator) override;

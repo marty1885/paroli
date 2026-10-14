@@ -128,10 +128,12 @@ std::vector<int16_t> RknnDecoderInfererImpl::infer(const xt::xarray<float>& z, c
         throw std::runtime_error("rknn_run failed. Error code: " + std::to_string(ret));
 
     ret = rknn_outputs_get(ctx, output_attrs.size(), outputs.data(), nullptr);
-    // FIXME: This is not super safe. But avoids memory allocation.
-    Defer defer([this]() { rknn_outputs_release(ctx, output_attrs.size(), outputs.data()); });
     if (ret != RKNN_SUCC)
         throw std::runtime_error("rknn_outputs_get failed. Error code: " + std::to_string(ret));
+    // The driver owns the buffers rknn_outputs_get hands out, so they are released on every path
+    // out of here - registered only once the call succeeded, so a failure cannot release a
+    // partially filled array.
+    Defer defer([this]() { rknn_outputs_release(ctx, output_attrs.size(), outputs.data()); });
 
     // output sanity check
     auto& outattr = output_attrs[outputs[0].index];
@@ -194,27 +196,27 @@ void RknnDecoderInferer::load(std::string modelPath, std::string accelerator)
 std::vector<int16_t> RknnDecoderInferer::infer(const xt::xarray<float>& z, const xt::xarray<float>& y_mask, const std::optional<xt::xarray<float>>& g)
 {
     int idx = 0;
-    do {
-        std::unique_lock<std::mutex> lock(mtx);
-        auto it = std::find(implTracker.begin(), implTracker.end(), 0);
-        if (it != implTracker.end()) {
-            idx = std::distance(implTracker.begin(), it);
-            implTracker[idx] = 1;
-            break;
-        }
-        cv.wait(lock, [this]() { return flag; });
-        it = std::find(implTracker.begin(), implTracker.end(), 0);
-        flag = false;
-        assert(it != implTracker.end());
-        idx = std::distance(implTracker.begin(), it);
-    } while(false);
-    auto& inferer = impls[idx];
-    auto ret = inferer.infer(z, y_mask, g);
     {
+        std::unique_lock<std::mutex> lock(mtx);
+        // Lease one of the three contexts. The predicate is "some slot is free", not a shared flag:
+        // one flag for three slots cannot say which slot was freed, and the search after a
+        // coalesced wake used to run past the end, guarded only by an assert that a Release build
+        // compiles out. The slot is marked busy here, under the lock, so two callers cannot lease
+        // the same context.
+        cv.wait(lock, [this]() {
+            return std::find(implTracker.begin(), implTracker.end(), 0) != implTracker.end();
+        });
+        auto it = std::find(implTracker.begin(), implTracker.end(), 0);
+        idx = std::distance(implTracker.begin(), it);
+        implTracker[idx] = 1;
+    }
+    // Return the context on every path out of here, including when the inference throws: a lease
+    // that leaks on a driver or validation failure permanently shrinks the pool, and three of them
+    // deadlock it.
+    Defer release([this, idx]() {
         std::lock_guard<std::mutex> lock(mtx);
         implTracker[idx] = 0;
-        flag = true;
         cv.notify_one();
-    }
-    return ret;
+    });
+    return impls[idx].infer(z, y_mask, g);
 }

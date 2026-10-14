@@ -89,7 +89,7 @@ example response:
 * Method: GET
 * Parameters: None
 
-This endpoint works exactly like the synthesise API above. But audio is streamed in chunk as soon as it can - reducing latency, as binary blobs. Message format is the same as the synthesise API body. A text message is sent once an error is encountered or synthesis of current text is finished.
+This endpoint works exactly like the synthesise API above. But audio is streamed in chunk as soon as it can - reducing latency, as binary blobs. Message format is the same as the synthesise API body. A text message is sent once an error is encountered or synthesis of current text is finished. For `pcm` the first text message is `{"status":"ok","sample_rate":<Hz>}`, carrying the model's native sample rate the following chunks are encoded at.
 
 For example, the following message causes OPUS audio to be streamed back as binray messages.
 

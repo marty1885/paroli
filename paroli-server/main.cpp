@@ -226,7 +226,7 @@ int main(int argc, char *argv[]) {
       spdlog::info("Using authentication token from environment variable PAROLI_TOKEN");
   }
   else if(!runConfig.authToken.empty()) {
-      spdlog::info("Authentication token: {}", runConfig.authToken);
+      spdlog::info("Using authentication token from --auth");
       authToken = runConfig.authToken;
   }
 
